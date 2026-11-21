@@ -117,6 +117,7 @@ class Turn:
     segment: str = ""
     claim: str = ""                                   # resume claim being verified, if any
     code: str = ""                                    # code / design pad contents at submit
+    exchanges: list = field(default_factory=list)     # live back-and-forth within this question [who, text, kind]
     ts: float = field(default_factory=time.time)
     answer: str = ""
     screenshots: list[str] = field(default_factory=list)
@@ -206,6 +207,9 @@ Return JSON: {{"agenda": [{{"kind": "<one of {list(SEGMENTS)}>", "minutes": <int
         lines = []
         for i, t in enumerate(self.turns[-limit:], 1):
             lines.append(f"Q{i} [{t.kind}, topic: {t.topic}]: {t.question}")
+            for who, text, kind in t.exchanges[-8:]:
+                if who == "Interviewer":
+                    lines.append(f"   (interviewer {kind}: {text})")
             lines.append(f"A{i}: {t.answer or '(not answered)'}")
             if t.code.strip():
                 lines.append(f"Code pad:\n{t.code.strip()[-1500:]}")
@@ -302,6 +306,9 @@ Return JSON: {{"say": "<what you say aloud>", "kind": "question" | "followup" | 
 Question asked: {turn.question}
 Hidden trap set by the interviewer: {turn.trap or "none"}
 Candidate's spoken/typed answer: {turn.answer or '(no verbal answer)'}
+{("Live back-and-forth during this question (hints given count against the candidate; clarifying questions asked "
+  "by the candidate count in their favour):" + chr(10) + chr(10).join(f"- {w} [{k}]: {t}" for w, t, k in turn.exchanges))
+ if turn.exchanges else ""}
 {f"Code / design pad:{chr(10)}```{chr(10)}{turn.code[-6000:]}{chr(10)}```" if turn.code.strip() else ""}
 {f"This question verifies the resume claim: {turn.claim}. Judge authenticity: does the answer show first-hand depth \
 (specific numbers, decisions, trade-offs, failures, their own part) or is it vague, generic, team-credit or \
@@ -331,6 +338,41 @@ that level and tier'; 9-10 is exceptional; 4-5 is a likely reject). Evaluate the
         except Exception:  # noqa: BLE001
             pass
         return fb
+
+    def react(self, turn: Turn, event: str) -> dict:
+        """Live interviewer reaction while the candidate is answering the current question."""
+        seg_i, seg_left = self.segment_at() if self.agenda else (0, 0)
+        seg = self.agenda[seg_i]["title"] if self.agenda else ""
+        coding = turn.segment in ("coding", "machine_coding", "design")
+        convo = "\n".join(f"{w} [{k}]: {t}" for w, t, k in turn.exchanges[-20:]) or "(nothing yet)"
+        prompt = f"""You are mid-interview, on this question:
+"{turn.question}"
+Segment: {seg} ({seg_left / 60:.1f} min left in it; {max(0, self.remaining()) / 60:.1f} min left in the interview).
+Time on this question so far: {(time.time() - turn.ts) / 60:.1f} min.
+{"Hidden trap you set: " + turn.trap if turn.trap and turn.trap.lower() != "none" else ""}
+
+What has been said on this question (candidate speech is speech-to-text):
+{convo}
+
+{"Candidate's code / design pad right now:" + chr(10) + "```" + chr(10) + (turn.code[-5000:] or "(empty)") + chr(10) + "```" if coding or turn.code.strip() else ""}
+
+Trigger: {{"utterance": "the candidate just finished speaking", "code": "the candidate paused after typing in the pad", \
+"silence": "the candidate has been silent for a while", "typed": "the candidate typed a message"}}[{event!r}]
+
+Behave like a real interviewer on a call. Decide ONE action:
+- "listen": they're mid-explanation, thinking aloud, or coding productively; don't interrupt.
+- "speak": short (1-2 sentences, spoken English, no markdown): answer a clarifying question without giving the \
+solution away; push back on a wrong or vague claim ("Are you sure?", "Why?"); quick probe on a missing piece; nudge \
+if stuck or silent ("Talk me through what you're thinking."); a small hint ONLY if they're clearly stuck for a long \
+time or ask for one (kind "hint"); remind about time if the segment is nearly over.
+- "next": the answer is complete (they finished and paused, said they're done, or for coding they've explained the \
+solution and you've covered complexity/edge cases), OR the segment time is up. Optionally add a brief neutral \
+transition in "say" (no praise). The system will then score this answer and ask the next/follow-up question.
+Never give the full answer. Stay neutral-to-skeptical.
+
+Return JSON: {{"action": "listen" | "speak" | "next", "say": "<text or ''>", \
+"kind": "clarify | probe | pushback | nudge | hint | time | transition"}}"""
+        return llm.ask_json(prompt, INTERVIEWER_SYSTEM, self.model)
 
     def hint(self, turn: Turn, on_text=None) -> str:
         prompt = (f"Question: {turn.question}\nCandidate's partial answer so far: {turn.answer or '(nothing yet)'}\n"

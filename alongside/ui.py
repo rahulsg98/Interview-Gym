@@ -14,7 +14,7 @@ from PySide6.QtGui import QAction, QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QFileDialog, QFormLayout, QHBoxLayout, QInputDialog, QLabel,
     QLineEdit, QListWidget, QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
-    QSpinBox, QSplitter, QTabWidget, QTextBrowser, QVBoxLayout, QWidget, QScrollArea, QFrame,
+    QSpinBox, QSplitter, QTabWidget, QTextBrowser, QVBoxLayout, QWidget, QScrollArea, QFrame, QStackedWidget,
 )
 
 from . import screen
@@ -41,6 +41,9 @@ QPushButton:disabled { color: #6b7080; }
 QPushButton#primary { background: #2f6fed; border-color: #2f6fed; font-weight: 600; }
 QPushButton#mic { background: #1f7a4d; border-color: #1f7a4d; font-weight: 600; min-height: 34px; }
 QPushButton#mic[rec="true"] { background: #c0392b; border-color: #c0392b; }
+QPushButton#danger { background: #8e2a20; border-color: #c0392b; font-weight: 600; }
+QPushButton#danger:hover { background: #a93226; }
+QPushButton#danger:disabled { background: #2a2f3a; border-color: #3a404d; }
 QScrollArea, QScrollArea > QWidget > QWidget { background: #14161b; }
 QTableWidget { background: #1d2027; color: #e6e6e6; }
 QHeaderView::section { background: #1d2027; color: #9aa0ac; border: none; padding: 4px; }
@@ -73,6 +76,7 @@ class Bridge(QObject):
     restore = Signal()
     submit_now = Signal()
     plan = Signal(str)
+    hint_ready = Signal(str)
     agenda = Signal(object)
     resume_done = Signal(object)
 
@@ -110,8 +114,13 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.main_tabs)
         root = QWidget(objectName="root")
         lay = QHBoxLayout(root)
+        self.iv_stack = QStackedWidget()
+        lay.addWidget(self.iv_stack)
+        setup_page = QWidget()
+        sp_lay = QHBoxLayout(setup_page); sp_lay.setContentsMargins(0, 0, 0, 0)
         split = QSplitter()
-        lay.addWidget(split)
+        sp_lay.addWidget(split)
+        self.iv_stack.addWidget(setup_page)
         self.main_tabs.addTab(root, "Interview")
         from .builder import RoundBuilder
         self.builder = RoundBuilder(self)
@@ -133,9 +142,9 @@ class MainWindow(QMainWindow):
         lv.addWidget(setup_scroll, 1)
         lv.addWidget(self.start_btn)  # pinned so it's always visible
         split.addWidget(left)
-        split.addWidget(self._build_interview())
         split.addWidget(self._build_side())
-        split.setSizes([330, 600, 390])
+        split.setSizes([460, 900])
+        self.iv_stack.addWidget(self._build_interview())  # page 1: live interview
 
         self.level_bar = QProgressBar(maximum=100, textVisible=False)
         self.level_bar.setFixedWidth(140)
@@ -161,6 +170,7 @@ class MainWindow(QMainWindow):
         b.submit_now.connect(self.submit_answer)
         b.plan.connect(self.dashboard.show_plan)
         b.agenda.connect(self._on_agenda)
+        b.hint_ready.connect(self._on_hint)
         b.resume_done.connect(self._on_resume_done)
         self._clock = QTimer(self, interval=1000, timeout=self._tick)
 
@@ -271,12 +281,19 @@ class MainWindow(QMainWindow):
         v.addWidget(self.speak)
         v.addWidget(self.live_fb)
         v.addWidget(self.use_cam)
+        self.hands_free = QCheckBox("Hands-free: talk with Arjun like a real call", checked=self.settings.hands_free)
+        self.hands_free.setToolTip("Arjun speaks, listens continuously, waits until you finish, reacts, nudges and "
+                                   "gives occasional hints. Say \"I'm done\" (or press Ctrl+Enter) to finish an answer.")
+        self.headphones = QCheckBox("I'm wearing headphones (lets me interrupt Arjun)", checked=self.settings.headphones)
+        v.addWidget(self.hands_free)
+        v.addWidget(self.headphones)
 
         self.start_btn = QPushButton("Start interview", objectName="primary")
         self.start_btn.clicked.connect(self.start_interview)
         return w
 
     def _build_interview(self) -> QWidget:
+        """Full-width live interview screen: question + conversation on the left, writing space on the right."""
         w = QWidget()
         v = QVBoxLayout(w)
         top = QHBoxLayout()
@@ -285,40 +302,96 @@ class MainWindow(QMainWindow):
         self.agenda_lbl.setTextFormat(Qt.RichText)
         self.clock_lbl = QLabel("")
         f = QFont(); f.setPointSize(18); f.setBold(True); self.clock_lbl.setFont(f)
-        top.addWidget(self.agenda_lbl, 1); top.addWidget(self.clock_lbl)
+        self.live_state = QLabel("")
+        self.live_state.setStyleSheet("color:#9aa0ac; font-weight:600")
+        self.end_top_btn = QPushButton("■  End interview", objectName="danger")
+        self.end_top_btn.setToolTip("Stop now and get the scored report")
+        self.end_top_btn.clicked.connect(self._confirm_end)
+        self.end_top_btn.setEnabled(False)
+        top.addWidget(self.agenda_lbl, 1); top.addWidget(self.live_state); top.addSpacing(10)
+        top.addWidget(self.clock_lbl); top.addSpacing(10); top.addWidget(self.end_top_btn)
         v.addLayout(top)
-        self.chat_view = QTextBrowser(openExternalLinks=True)
-        v.addWidget(self.chat_view, 3)
 
-        self.answer_tabs = QTabWidget()
+        main = QSplitter()
+        # ---- left: current question + conversation
+        left = QSplitter(Qt.Vertical)
+        self.q_card = QLabel("<i>Arjun will ask the first question in a moment…</i>")
+        self.q_card.setWordWrap(True)
+        self.q_card.setTextFormat(Qt.RichText)
+        self.q_card.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        self.q_card.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.q_card.setStyleSheet("background:#1d2027; border:1px solid #2f6fed; border-radius:8px; padding:14px;"
+                                  "font-size:16px; color:#e6e6e6")
+        q_scroll = QScrollArea(widgetResizable=True)
+        q_scroll.setFrameShape(QFrame.NoFrame)
+        q_scroll.setWidget(self.q_card)
+        self.chat_view = QTextBrowser(openExternalLinks=True)
+        left.addWidget(q_scroll); left.addWidget(self.chat_view)
+        left.setSizes([260, 420])
+
+        # ---- right: writing space, both always visible
+        right = QWidget()
+        rv = QVBoxLayout(right); rv.setContentsMargins(0, 0, 0, 0)
+        self.write_split = QSplitter(Qt.Vertical)
+        ans_box = QWidget(); av = QVBoxLayout(ans_box); av.setContentsMargins(0, 0, 0, 0)
+        av.addWidget(QLabel("Your answer: live transcript of what you say (you can also type or edit)"))
         self.answer = QPlainTextEdit()
-        self.answer.setPlaceholderText("Your spoken/typed answer. Ctrl+Space: mic on/off   Ctrl+Enter: submit   "
-                                       "Ctrl+H: hint   Ctrl+Shift+S: review my screen")
+        self.answer.setPlaceholderText("Just talk. Your words appear here. Ctrl+Enter: submit   Ctrl+H: hint   "
+                                       "Ctrl+Space: mute/unmute   Ctrl+Shift+S: review my screen")
+        av.addWidget(self.answer)
+        pad_box = QWidget(); pv = QVBoxLayout(pad_box); pv.setContentsMargins(0, 0, 0, 0)
+        pv.addWidget(QLabel("Code / design pad: Arjun reads everything you write here"))
         self.pad = QPlainTextEdit()
         from PySide6.QtGui import QFontDatabase
-        mono = QFontDatabase.systemFont(QFontDatabase.FixedFont); mono.setPointSize(11)
+        mono = QFontDatabase.systemFont(QFontDatabase.FixedFont); mono.setPointSize(12)
         self.pad.setFont(mono)
         self.pad.setTabStopDistance(4 * self.pad.fontMetrics().horizontalAdvance(" "))
-        self.pad.setPlaceholderText("Code / design pad. Arjun reads this when you submit. Write code for coding "
-                                    "rounds; for system design, outline components, APIs, schema and numbers (or draw "
-                                    "in a whiteboard app and press 'Review my screen').")
-        self.answer_tabs.addTab(self.answer, "Answer")
-        self.answer_tabs.addTab(self.pad, "Code / design pad")
-        v.addWidget(self.answer_tabs, 2)
+        self.pad.setPlaceholderText("Write code for coding rounds. For system design, outline components, APIs, "
+                                    "schema and numbers (or draw in a whiteboard app and press 'Review my screen').")
+        pv.addWidget(self.pad)
+        self.write_split.addWidget(ans_box); self.write_split.addWidget(pad_box)
+        self.write_split.setSizes([300, 300])
+        rv.addWidget(self.write_split, 1)
+        self.live_fb_view = QTextBrowser(openExternalLinks=True)
+        self.live_fb_view.setVisible(False)
 
+        main.addWidget(left); main.addWidget(right); main.addWidget(self.live_fb_view)
+        main.setSizes([520, 760, 0])
+        self._live_main = main
+        v.addWidget(main, 1)
+
+        self._answer_cache = self._pad_cache = self._pad_snapshot = ""
+        self.live = None
+        self.answer.textChanged.connect(lambda: setattr(self, "_answer_cache", self.answer.toPlainText().strip()))
+
+        def _pad_changed():
+            self._pad_cache = self.pad.toPlainText()
+            if self.live:
+                self.live.note_edit()
+        self.pad.textChanged.connect(_pad_changed)
+
+        # ---- bottom controls
+        bar = QHBoxLayout()
+        self.live_cam_view = QLabel("Camera off")
+        self.live_cam_view.setFixedSize(128, 96)
+        self.live_cam_view.setScaledContents(True)
+        self.live_cam_view.setAlignment(Qt.AlignCenter)
+        self.live_cam_view.setStyleSheet("background:#1d2027; border:1px solid #2c313b; border-radius:6px; "
+                                         "color:#6b7080; font-size:10px")
+        bar.addWidget(self.live_cam_view)
+        col = QVBoxLayout()
         r1 = QHBoxLayout()
         self.mic_btn = QPushButton("🎙  Start speaking", objectName="mic")
         self.mic_btn.clicked.connect(self.toggle_mic)
-        self.submit_btn = QPushButton("Submit answer", objectName="primary")
+        self.submit_btn = QPushButton("Submit answer  (Ctrl+Enter)", objectName="primary")
         self.submit_btn.clicked.connect(self.submit_answer)
         r1.addWidget(self.mic_btn, 2)
         r1.addWidget(self.submit_btn, 1)
-        v.addLayout(r1)
-
+        col.addLayout(r1)
         r2 = QHBoxLayout()
         self.hint_btn = QPushButton("Hint")
         self.hint_btn.clicked.connect(self.ask_hint)
-        self.repeat_btn = QPushButton("Repeat")
+        self.repeat_btn = QPushButton("Repeat question")
         self.repeat_btn.clicked.connect(self.repeat_question)
         self.screen_btn = QPushButton("Review my screen")
         self.screen_btn.clicked.connect(lambda: self.review_screen(False))
@@ -326,12 +399,32 @@ class MainWindow(QMainWindow):
         self.region_btn.clicked.connect(lambda: self.review_screen(True))
         self.skip_btn = QPushButton("Skip")
         self.skip_btn.clicked.connect(self.skip_question)
-        self.end_btn = QPushButton("End && report")
-        self.end_btn.clicked.connect(self.end_interview)
-        for btn in (self.hint_btn, self.repeat_btn, self.screen_btn, self.region_btn, self.skip_btn, self.end_btn):
+        self.fb_toggle = QPushButton("📊 Feedback")
+        self.fb_toggle.setCheckable(True)
+        self.fb_toggle.setToolTip("Peek at feedback on your previous answers (hidden by default to keep focus)")
+        self.fb_toggle.toggled.connect(self._toggle_live_fb)
+        self.end_btn = QPushButton("End && report")  # kept for shortcuts/state; End lives in the top bar
+        self.end_btn.clicked.connect(self._confirm_end)
+        self.end_btn.hide()
+        for btn in (self.hint_btn, self.repeat_btn, self.screen_btn, self.region_btn, self.skip_btn, self.fb_toggle):
             r2.addWidget(btn)
-        v.addLayout(r2)
+        col.addLayout(r2)
+        bar.addLayout(col, 1)
+        v.addLayout(bar)
         return w
+
+    def _toggle_live_fb(self, on: bool):
+        self.live_fb_view.setVisible(on)
+        sizes = self._live_main.sizes()
+        total = sum(sizes)
+        self._live_main.setSizes([int(total * 0.3), int(total * 0.45), int(total * 0.25)] if on
+                                 else [int(total * 0.4), int(total * 0.6), 0])
+
+    def _focus_pad(self, coding: bool):
+        total = sum(self.write_split.sizes()) or 600
+        self.write_split.setSizes([int(total * 0.25), int(total * 0.75)] if coding else [int(total * 0.6),
+                                                                                         int(total * 0.4)])
+        (self.pad if coding else self.answer).setFocus()
 
     def _build_side(self) -> QWidget:
         self.tabs = QTabWidget()
@@ -475,6 +568,9 @@ class MainWindow(QMainWindow):
         self.settings.whisper_model = self.whisper.currentText()
         self.settings.speak_questions = self.speak.isChecked()
         self.settings.use_camera = self.use_cam.isChecked()
+        self.settings.hands_free = self.hands_free.isChecked()
+        self.settings.headphones = self.headphones.isChecked()
+        self._stop_live()
         if self.use_cam.isChecked():
             self.start_camera()
         self.settings.save()
@@ -485,6 +581,9 @@ class MainWindow(QMainWindow):
         self.chat_view.clear(); self.fb_view.clear(); self.report_view.clear(); self.answer.clear()
         self.pad.clear(); self._pad_snapshot = ""; self._time_up = False
         self.agenda_lbl.setText("<i>Planning the agenda…</i>"); self.clock_lbl.setText("")
+        self.q_card.setText("<i>Getting ready: loading voice and planning your agenda…</i>")
+        self.live_fb_view.clear(); self.fb_toggle.setChecked(False); self.fb_toggle.setText("📊 Feedback")
+        self.iv_stack.setCurrentIndex(1)
         self.start_btn.setEnabled(False)
         run_bg(self.b, self._prepare_and_ask)
 
@@ -523,38 +622,53 @@ class MainWindow(QMainWindow):
             self._voice_key = key
 
     def _ask_next(self):
+        self._asking = True
         self.b.status.emit("Arjun is thinking of a question…")
-        turn = self.session.next_question()
+        try:
+            turn = self.session.next_question()
+        except Exception:
+            self._asking = False
+            raise
+        self._asking = False
         self.b.question.emit(turn)
 
     def _on_ready(self):
         self._set_interview_enabled(True)
+        if self.hands_free.isChecked():
+            self._start_live()
 
     def _on_question(self, turn: Turn):
         tag = {"followup": "Follow-up", "wrap": "Interviewer"}.get(turn.kind, f"Q{self.session.main_questions_asked}")
         self._append_chat(f"Arjun · {tag}" + (f" · {turn.topic}" if turn.topic else ""), turn.question)
-        if self.speaker and self.speak.isChecked():
+        if self.live:
+            self.live.new_question(turn.question)
+        elif self.speaker and self.speak.isChecked():
             self.speaker.say(turn.question)
         self.answer.clear()
         self._turn_start, self._turn_audio = time.time(), {}
-        if turn.segment in CODE_SEGMENTS:
-            if turn.kind == "question" and self.pad.toPlainText().strip():
-                self.pad.clear()  # new problem: fresh pad (previous code is saved with its answer)
-            self.answer_tabs.setCurrentWidget(self.pad)
-            self.pad.setFocus()
-        else:
-            self.answer_tabs.setCurrentWidget(self.answer)
+        if turn.segment in CODE_SEGMENTS and turn.kind == "question" and self.pad.toPlainText().strip():
+            self.pad.clear()  # new problem: fresh pad (previous code is saved with its answer)
+        self._focus_pad(turn.segment in CODE_SEGMENTS)
+        seg_name = SEGMENTS.get(turn.segment, "").split(" (")[0]
+        meta = " · ".join(x for x in (tag, seg_name, turn.topic) if x)
+        hint = ("<br><span style='color:#9aa0ac;font-size:13px'>Write your solution in the pad on the right and talk "
+                "through it.</span>" if turn.segment in CODE_SEGMENTS else "")
+        self.q_card.setText(f"<span style='color:#7fb2ff;font-size:12px;font-weight:600'>{html.escape(meta)}</span>"
+                            f"<br><br>{html.escape(turn.question)}{hint}")
         self._pad_snapshot = self.pad.toPlainText()
         self._draw_agenda()
         if turn.kind == "wrap":
             self.end_interview()
+        elif self.live:
+            self.b.status.emit("Arjun is listening. Just talk. Say \"I'm done\" or press Ctrl+Enter when you've finished.")
         else:
             self.b.status.emit("Your turn. Ctrl+Space to talk, Ctrl+Enter to submit.")
 
     def submit_answer(self):
-        if not self.session or not self.session.current or self._pending:
+        # Only block while the next question is being prepared; scoring of earlier answers runs in the background.
+        if not self.session or not self.session.current or getattr(self, "_asking", False):
             return
-        if self.recorder and self.recorder.recording:
+        if not self.live and self.recorder and self.recorder.recording:
             self.toggle_mic(then_submit=True)
             return
         turn = self.session.current
@@ -566,9 +680,13 @@ class MainWindow(QMainWindow):
         turn.metrics = soft.delivery(turn.answer, getattr(self, "_turn_audio", {}))
         if self.camera and self.camera.running:
             turn.camera = self.camera.stats(getattr(self, "_turn_start", time.time() - 120))
-        if self.speaker:
-            self.speaker.stop()
-        self._append_chat("You", turn.answer or "(answered on screen)")
+        if self.live:
+            self.live.hold()
+            self._append_chat("You · final answer", "(submitted)" if turn.answer else "(answered in the pad)")
+        else:
+            if self.speaker:
+                self.speaker.stop()
+            self._append_chat("You", turn.answer or "(answered on screen)")
         self.answer.clear()
         # Evaluate and fetch the next question in parallel to cut waiting time.
         run_bg(self.b, self._evaluate, turn)
@@ -579,15 +697,21 @@ class MainWindow(QMainWindow):
         self.b.feedback.emit(turn)
 
     def skip_question(self):
-        if not self.session or not self.session.current or self._pending:
+        if not self.session or not self.session.current or getattr(self, "_asking", False):
             return
+        if self.live:
+            self.live.hold()
         self.session.current.answer = "(skipped)"
         self._append_chat("You", "(skipped)")
         run_bg(self.b, self._ask_next)
 
     def repeat_question(self):
-        if self.session and self.session.current and self.speaker:
-            self.speaker.stop()
+        if not (self.session and self.session.current and self.speaker):
+            return
+        self.speaker.stop()
+        if self.live:
+            self.live.say(self.session.current.question, "repeat")
+        else:
             self.speaker.say(self.session.current.question)
 
     def ask_hint(self):
@@ -597,7 +721,17 @@ class MainWindow(QMainWindow):
         turn.answer = self.answer.toPlainText().strip()
         turn.code = self._pad_for(turn)
         self._stream_start("Hint")
-        run_bg(self.b, lambda: self.b.chat.emit("Hint", self.session.hint(turn, on_text=self.b.stream.emit)))
+        run_bg(self.b, lambda: self.b.hint_ready.emit(self.session.hint(turn, on_text=self.b.stream.emit)), busy=False)
+
+    def _on_hint(self, text: str):
+        if self.live:
+            self.live.say(text, "hint")  # spoken, shown in chat, and recorded as a hint used
+        else:
+            if self.session and self.session.current:
+                self.session.current.exchanges.append(["Interviewer", text, "hint"])
+            self._append_chat("Arjun · hint", text)
+            if self.speaker and self.speak.isChecked():
+                self.speaker.say(text)
 
     def review_screen(self, interactive: bool):
         if not self.session or not self.session.current:
@@ -627,6 +761,8 @@ class MainWindow(QMainWindow):
             return
         self._set_interview_enabled(False)
         self._clock.stop()
+        self._stop_live()
+        self.iv_stack.setCurrentIndex(0)  # back to the setup screen, where the analysis lives
         self.tabs.setCurrentWidget(self.report_view)
         self.report_view.setMarkdown("_Writing your report…_")
 
@@ -705,6 +841,10 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ mic
     def toggle_mic(self, then_submit: bool = False):
+        if self.live:
+            self.live.set_paused(not self.live.paused)
+            self._set_mic_ui_live()
+            return
         if not self.recorder or not self.session:
             return
         if not self.recorder.recording:
@@ -739,7 +879,9 @@ class MainWindow(QMainWindow):
         self.mic_btn.style().unpolish(self.mic_btn); self.mic_btn.style().polish(self.mic_btn)
 
     def _update_level(self):
-        if self.recorder:
+        if self.live:
+            self.level_bar.setValue(int(self.live.level * 100))
+        elif self.recorder:
             self.level_bar.setValue(int(self.recorder.level * 100))
 
     def _on_transcript(self, text: str):
@@ -788,6 +930,8 @@ class MainWindow(QMainWindow):
         md += soft_markdown(fb, turn.metrics, turn.camera)
         self.tabs.setCurrentWidget(self.fb_view)
         self.fb_view.setMarkdown("\n".join(md))
+        self.live_fb_view.setMarkdown("\n".join(md))
+        self.fb_toggle.setText(f"📊 Feedback · last {fb.get('score', '?')}/10")
 
     def _on_report(self, text: str):
         self.report_view.setMarkdown(text)
@@ -797,6 +941,11 @@ class MainWindow(QMainWindow):
         self.start_btn.setEnabled(True)
 
     def _on_error(self, msg: str):
+        self._asking = False
+        if self.session and not self.session.turns:
+            self._stop_live()
+            self._clock.stop()
+            self.iv_stack.setCurrentIndex(0)
         self.statusBar().showMessage("Error: " + msg.splitlines()[0])
         QMessageBox.warning(self, "AlongSide", msg)
         self.start_btn.setEnabled(True)
@@ -805,13 +954,103 @@ class MainWindow(QMainWindow):
 
     def _on_busy(self, on: bool):
         self._pending = max(0, self._pending + (1 if on else -1))
-        self.submit_btn.setEnabled(self._pending == 0 and self.session is not None)
-        self.skip_btn.setEnabled(self._pending == 0 and self.session is not None)
+        ready = not getattr(self, "_asking", False) and self.session is not None and not self.session.report
+        self.submit_btn.setEnabled(ready)
+        self.skip_btn.setEnabled(ready)
 
     def _set_interview_enabled(self, on: bool):
         for btn in (self.mic_btn, self.submit_btn, self.hint_btn, self.repeat_btn, self.screen_btn,
-                    self.region_btn, self.skip_btn, self.end_btn):
+                    self.region_btn, self.skip_btn, self.end_btn, self.end_top_btn):
             btn.setEnabled(on)
+
+    # ------------------------------------------------------------------ hands-free live conversation
+    def _start_live(self):
+        from .live import LiveConversation
+        self._stop_live()
+        self.live = LiveConversation(
+            self, react_fn=self._live_react, get_code=lambda: self._pad_cache,
+            is_code_question=lambda: bool(self.session and self.session.current
+                                          and self.session.current.segment in CODE_SEGMENTS),
+            patience=2.0, headphones=self.headphones.isChecked())
+        self.live.user_text.connect(self._live_user_text)
+        self.live.interviewer.connect(self._live_interviewer)
+        self.live.next_requested.connect(lambda _reason: self.submit_answer())
+        self.live.state.connect(self._live_state)
+        self.live.start()
+        self._level_timer.start()
+        self._set_mic_ui_live()
+
+    def _stop_live(self):
+        live = getattr(self, "live", None)
+        if live:
+            live.stop()
+        self.live = None
+        self.live_state.setText("")
+        if hasattr(self, "_level_timer"):
+            self._level_timer.stop()
+
+    def _live_react(self, event: str) -> dict:
+        # Runs on a worker thread: only plain data here, no widget access.
+        turn = self.session.current if self.session else None
+        if not turn or turn.kind == "wrap":
+            return {"action": "listen"}
+        turn.answer = self._answer_cache
+        turn.code = self._pad_cache if (turn.segment in CODE_SEGMENTS or self._pad_cache != self._pad_snapshot) else ""
+        return self.session.react(turn, event)
+
+    def _live_user_text(self, text: str, stats):
+        turn = self.session.current if self.session else None
+        if not turn:
+            return
+        cur = self.answer.toPlainText().strip()
+        self.answer.setPlainText((cur + " " + text).strip())
+        turn.exchanges.append(["Candidate", text, "speech"])
+        self._turn_audio = soft.merge_audio_stats(getattr(self, "_turn_audio", {}), stats or {})
+        self._append_chat("You", text)
+        if self.camera and self.camera.running and len(turn.camera_shots) < 2:
+            shot = self.camera.snapshot()
+            if shot:
+                turn.camera_shots.append(str(shot))
+
+    def _live_interviewer(self, text: str, kind: str):
+        turn = self.session.current if self.session else None
+        if turn:
+            turn.exchanges.append(["Interviewer", text, kind])
+        label = {"hint": "Arjun · hint", "ack": "Arjun", "nudge": "Arjun · nudge", "time": "Arjun · time",
+                 "pushback": "Arjun", "clarify": "Arjun · clarifies"}.get(kind, "Arjun")
+        if kind == "ack":
+            self.live_state.setText(f"Arjun: {text}")
+            return
+        self._append_chat(label, text)
+
+    def _live_state(self, state: str):
+        txt = {"listening": ("●  Listening", "#1f9d63"), "you": ("●  You're speaking…", "#7ee0a8"),
+               "thinking": ("●  Arjun is thinking…", "#c98a1b"), "speaking": ("●  Arjun is speaking…", "#7fb2ff"),
+               "paused": ("●  Mic muted", "#c0392b"), "hold": ("●  Noting your answer…", "#c98a1b")}.get(state)
+        if txt:
+            self.live_state.setText(txt[0])
+            self.live_state.setStyleSheet(f"color:{txt[1]}; font-weight:600")
+
+    def _set_mic_ui_live(self):
+        muted = bool(self.live and self.live.paused)
+        self.mic_btn.setText("🔇  Muted (click to unmute)" if muted else "🎙  Mic live (click to mute)")
+        self.mic_btn.setProperty("rec", "true" if muted else "false")
+        self.mic_btn.style().unpolish(self.mic_btn); self.mic_btn.style().polish(self.mic_btn)
+
+    def _confirm_end(self):
+        if not self.session or not self.session.turns:
+            return
+        if QMessageBox.question(self, "End interview", "End the interview now and get your scored report?") \
+                == QMessageBox.Yes:
+            turn = self.session.current
+            if turn and not turn.answer and turn.kind != "wrap":
+                turn.answer = self.answer.toPlainText().strip()
+                turn.code = self._pad_for(turn)
+                if turn.answer or turn.code.strip():
+                    turn.metrics = soft.delivery(turn.answer, getattr(self, "_turn_audio", {}))
+            if self.speaker:
+                self.speaker.stop()
+            self.end_interview()
 
     # ------------------------------------------------------------------ dashboard actions
     def generate_plan(self, role: str, difficulty: str, tier: str):
@@ -867,7 +1106,7 @@ class MainWindow(QMainWindow):
         if self.camera:
             self.camera.stop()
         self._cam_timer.stop()
-        for lbl in (self.cam_view, self.builder.cam_view):
+        for lbl in (self.cam_view, self.builder.cam_view, self.live_cam_view):
             lbl.clear(); lbl.setText("Camera off")
         self.cam_stats.setText("")
 
@@ -893,7 +1132,7 @@ class MainWindow(QMainWindow):
             return
         buf, w, h = data
         pix = QPixmap.fromImage(QImage(buf, w, h, 3 * w, QImage.Format_RGB888).copy())
-        for lbl in (self.cam_view, self.builder.cam_view):
+        for lbl in (self.cam_view, self.builder.cam_view, self.live_cam_view):
             if lbl.isVisible():
                 lbl.setPixmap(pix)
         st = cam.stats(time.time() - 60)

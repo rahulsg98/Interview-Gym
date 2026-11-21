@@ -42,10 +42,25 @@ def ensure_voice(repo_path: str, progress=None) -> Path:
     return onnx
 
 
-def _player(rate: int) -> list[str]:
+def _player() -> list[str]:
+    """Command that plays a WAV stream from stdin."""
     if shutil.which("pw-play"):
-        return ["pw-play", "--rate", str(rate), "--channels", "1", "--format", "s16", "-"]
-    return ["aplay", "-q", "-f", "S16_LE", "-r", str(rate), "-c", "1", "-t", "raw"]
+        return ["pw-play", "-"]
+    if shutil.which("paplay"):
+        return ["paplay"]
+    return ["aplay", "-q", "-"]
+
+
+def _wav(pcm: bytes, rate: int) -> bytes:
+    import io
+    import wave
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(pcm)
+    return buf.getvalue()
 
 
 class Speaker:
@@ -58,9 +73,11 @@ class Speaker:
         self.voice = PiperVoice.load(ensure_voice(repo_path, progress))
         self.cfg = SynthesisConfig(speaker_id=speaker, length_scale=rate)
         self.rate = self.voice.config.sample_rate
+        self.last_error = ""
         self._q: queue.Queue[str | None] = queue.Queue()
         self._proc: subprocess.Popen | None = None
         self._gen = 0
+        self._active = False  # True from dequeue until playback of that sentence ends
         self._lock = threading.Lock()
         threading.Thread(target=self._loop, daemon=True).start()
 
@@ -91,23 +108,37 @@ class Speaker:
 
     @property
     def busy(self) -> bool:
-        return not self._q.empty() or (self._proc is not None and self._proc.poll() is None)
+        return self._active or not self._q.empty() or (self._proc is not None and self._proc.poll() is None)
 
     def _loop(self) -> None:
         while True:
             sentence = self._q.get()
             if sentence is None:
                 return
-            gen = self._gen
-            audio = b"".join(c.audio_int16_bytes for c in self.voice.synthesize(sentence, self.cfg))
-            with self._lock:
-                if gen != self._gen:
-                    continue
-                self._proc = subprocess.Popen(_player(self.rate), stdin=subprocess.PIPE,
-                                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self._active = True
             try:
-                self._proc.stdin.write(audio)
-                self._proc.stdin.close()
-            except (BrokenPipeError, ValueError):
-                pass
-            self._proc.wait()
+                gen = self._gen
+                pcm = b"".join(c.audio_int16_bytes for c in self.voice.synthesize(sentence, self.cfg))
+                with self._lock:
+                    if gen != self._gen:
+                        continue
+                    self._proc = subprocess.Popen(_player(), stdin=subprocess.PIPE,
+                                                  stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                proc = self._proc
+                try:
+                    proc.stdin.write(_wav(pcm, self.rate))
+                    proc.stdin.close()
+                except (BrokenPipeError, ValueError):
+                    pass
+                proc.wait()
+                if proc.returncode not in (0, -9, -15) and gen == self._gen:
+                    err = proc.stderr.read().decode(errors="ignore").strip() if proc.stderr else ""
+                    import logging
+                    logging.error("Audio playback failed (%s): %s", proc.returncode, err)
+                    self.last_error = err or f"player exit code {proc.returncode}"
+            except Exception as e:  # noqa: BLE001
+                import logging
+                logging.exception("TTS failed")
+                self.last_error = str(e)
+            finally:
+                self._active = self._q.qsize() > 0

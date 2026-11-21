@@ -63,7 +63,9 @@ def audio_stats(audio: np.ndarray, rate: int = 16000) -> dict:
 
 
 def merge_audio_stats(a: dict, b: dict) -> dict:
-    if not a:
+    if not b or "audio_sec" not in b:
+        return dict(a or {})
+    if not a or "audio_sec" not in a:
         return dict(b)
     return {"audio_sec": a["audio_sec"] + b["audio_sec"], "speech_sec": a["speech_sec"] + b["speech_sec"],
             "pauses": a["pauses"] + b["pauses"], "longest_pause": max(a["longest_pause"], b["longest_pause"]),

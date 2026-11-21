@@ -26,6 +26,8 @@ class Settings:
     speech_rate: float = 1.0              # >1 slower, <1 faster (piper length_scale)
     speak_questions: bool = True
     use_camera: bool = True
+    hands_free: bool = True
+    headphones: bool = False
     profiles: dict = field(default_factory=dict)  # name -> {role, resume, jd, focus}
 
     @classmethod
