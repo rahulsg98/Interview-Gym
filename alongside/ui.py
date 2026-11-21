@@ -967,6 +967,12 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("AlongSide")
     app.setDesktopFileName("alongside")
+    from PySide6.QtGui import QIcon
+    from .config import ROOT
+    icon = QIcon()
+    for size in (16, 24, 32, 48, 64, 128, 256, 512):
+        icon.addFile(str(ROOT / "assets" / f"alongside-{size}.png"))
+    app.setWindowIcon(QIcon.fromTheme("alongside", icon))
     font = app.font()
     font.setPointSize(10)
     app.setFont(font)
