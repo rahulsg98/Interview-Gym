@@ -1,0 +1,937 @@
+"""AlongSide desktop UI (PySide6)."""
+from __future__ import annotations
+
+import html
+import sys
+import threading
+import time
+import traceback
+from dataclasses import asdict
+from pathlib import Path
+
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtGui import QAction, QFont, QKeySequence, QShortcut
+from PySide6.QtWidgets import (
+    QApplication, QCheckBox, QComboBox, QFileDialog, QFormLayout, QHBoxLayout, QInputDialog, QLabel,
+    QLineEdit, QListWidget, QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
+    QSpinBox, QSplitter, QTabWidget, QTextBrowser, QVBoxLayout, QWidget,
+)
+
+from . import screen
+from .config import SESSIONS_DIR, Settings
+from .dashboard import Dashboard
+from .interview import (CODE_SEGMENTS, DIFFICULTIES, DURATIONS, ROLES, ROUNDS, SEGMENTS, Profile, Session, Turn,
+                        improvement_plan)
+from . import resume as resume_mod
+from .knowledge import DIFFICULTIES as DIFF_DESC, TIER_NAMES
+from . import progress
+from . import soft
+from PySide6.QtGui import QImage, QPixmap
+from .tts import VOICES, voice_key
+
+STYLE = """
+QMainWindow, QWidget#root { background: #14161b; color: #e6e6e6; }
+QLabel, QCheckBox { color: #c9ccd3; }
+QPushButton#primary:disabled, QPushButton#mic:disabled { background: #2a2f3a; border-color: #3a404d; }
+QTextBrowser, QPlainTextEdit, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QListWidget {
+  background: #1d2027; color: #e6e6e6; border: 1px solid #2c313b; border-radius: 6px; padding: 6px; }
+QPushButton { background: #2a2f3a; color: #e6e6e6; border: 1px solid #3a404d; border-radius: 6px; padding: 7px 12px; }
+QPushButton:hover { background: #343a47; }
+QPushButton:disabled { color: #6b7080; }
+QPushButton#primary { background: #2f6fed; border-color: #2f6fed; font-weight: 600; }
+QPushButton#mic { background: #1f7a4d; border-color: #1f7a4d; font-weight: 600; min-height: 34px; }
+QPushButton#mic[rec="true"] { background: #c0392b; border-color: #c0392b; }
+QScrollArea, QScrollArea > QWidget > QWidget { background: #14161b; }
+QTableWidget { background: #1d2027; color: #e6e6e6; }
+QHeaderView::section { background: #1d2027; color: #9aa0ac; border: none; padding: 4px; }
+QTableCornerButton::section { background: #1d2027; border: none; }
+QTabWidget::pane { border: 1px solid #2c313b; border-radius: 6px; }
+QTabBar::tab { background: #1d2027; color: #c9ccd3; padding: 7px 14px; }
+QTabBar::tab:selected { background: #2a2f3a; color: white; }
+QProgressBar { background: #1d2027; border: 1px solid #2c313b; border-radius: 4px; height: 8px; }
+QProgressBar::chunk { background: #1f9d63; }
+"""
+
+
+class Bridge(QObject):
+    status = Signal(str)
+    chat = Signal(str, str)          # who, text
+    question = Signal(object)        # Turn
+    feedback = Signal(object)        # Turn
+    transcript = Signal(str)
+    stream = Signal(str)             # streamed chunk for the side panel
+    report = Signal(str)
+    error = Signal(str)
+    ready = Signal()
+    busy = Signal(bool)
+    restore = Signal()
+    submit_now = Signal()
+    plan = Signal(str)
+    agenda = Signal(object)
+    resume_done = Signal(object)
+
+
+def run_bg(bridge: Bridge, fn, *args, busy: bool = True):
+    def target():
+        if busy:
+            bridge.busy.emit(True)
+        try:
+            fn(*args)
+        except Exception as e:  # noqa: BLE001
+            traceback.print_exc()
+            bridge.error.emit(str(e))
+        finally:
+            if busy:
+                bridge.busy.emit(False)
+    threading.Thread(target=target, daemon=True).start()
+
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("AlongSide - Mock Interview Practice")
+        self.resize(1320, 840)
+        self.settings = Settings.load()
+        self.b = Bridge()
+        self.session: Session | None = None
+        self.speaker = None
+        self.transcriber = None
+        self.recorder = None
+        self._pending = 0
+
+        self.main_tabs = QTabWidget()
+        self.main_tabs.setDocumentMode(True)
+        self.setCentralWidget(self.main_tabs)
+        root = QWidget(objectName="root")
+        lay = QHBoxLayout(root)
+        split = QSplitter()
+        lay.addWidget(split)
+        self.main_tabs.addTab(root, "Interview")
+        from .builder import RoundBuilder
+        self.builder = RoundBuilder(self)
+        self.builder.setObjectName("root")
+        self.main_tabs.addTab(self.builder, "Round Builder")
+        self.dashboard = Dashboard()
+        self.dashboard.setObjectName("root")
+        self.main_tabs.addTab(self.dashboard, "Dashboard")
+        self.main_tabs.currentChanged.connect(lambda i: self.main_tabs.widget(i) is self.dashboard and self.dashboard.refresh())
+        self.dashboard.plan_requested.connect(self.generate_plan)
+        self.dashboard.practice_requested.connect(self.practice_area)
+        split.addWidget(self._build_setup())
+        split.addWidget(self._build_interview())
+        split.addWidget(self._build_side())
+        split.setSizes([330, 600, 390])
+
+        self.level_bar = QProgressBar(maximum=100, textVisible=False)
+        self.level_bar.setFixedWidth(140)
+        self.statusBar().addPermanentWidget(QLabel("Mic"))
+        self.statusBar().addPermanentWidget(self.level_bar)
+        self.statusBar().setStyleSheet("color:#9aa0ac")
+        self._level_timer = QTimer(self, interval=100, timeout=self._update_level)
+        self.camera = None
+        self._cam_timer = QTimer(self, interval=150, timeout=self._update_camera)
+
+        b = self.b
+        b.status.connect(self.statusBar().showMessage)
+        b.chat.connect(self._append_chat)
+        b.question.connect(self._on_question)
+        b.feedback.connect(self._on_feedback)
+        b.transcript.connect(self._on_transcript)
+        b.stream.connect(self._on_stream)
+        b.report.connect(self._on_report)
+        b.error.connect(self._on_error)
+        b.ready.connect(self._on_ready)
+        b.busy.connect(self._on_busy)
+        b.restore.connect(self.showNormal)
+        b.submit_now.connect(self.submit_answer)
+        b.plan.connect(self.dashboard.show_plan)
+        b.agenda.connect(self._on_agenda)
+        b.resume_done.connect(self._on_resume_done)
+        self._clock = QTimer(self, interval=1000, timeout=self._tick)
+
+        QShortcut(QKeySequence("Ctrl+Space"), self, activated=self.toggle_mic)
+        QShortcut(QKeySequence("Ctrl+Return"), self, activated=self.submit_answer)
+        QShortcut(QKeySequence("Ctrl+H"), self, activated=self.ask_hint)
+        QShortcut(QKeySequence("Ctrl+Shift+S"), self, activated=lambda: self.review_screen(False))
+        quit_act = QAction("Quit", self, shortcut=QKeySequence("Ctrl+Q"), triggered=self.close)
+        self.addAction(quit_act)
+
+        self._set_interview_enabled(False)
+        self._load_profile_names()
+        self.statusBar().showMessage("Fill in your profile, then press Start interview.")
+
+    # ------------------------------------------------------------------ layout
+    def _build_setup(self) -> QWidget:
+        w = QWidget()
+        v = QVBoxLayout(w)
+        title = QLabel("AlongSide")
+        f = QFont(); f.setPointSize(20); f.setBold(True); title.setFont(f)
+        v.addWidget(title)
+        v.addWidget(QLabel("Mock interview practice"))
+
+        prow = QHBoxLayout()
+        self.profile_box = QComboBox()
+        self.profile_box.activated.connect(lambda _: self._apply_profile(self.profile_box.currentText()))
+        save = QPushButton("Save")
+        save.clicked.connect(self._save_profile)
+        delete = QPushButton("Delete")
+        delete.clicked.connect(self._delete_profile)
+        prow.addWidget(self.profile_box, 1)
+        prow.addWidget(save)
+        prow.addWidget(delete)
+        v.addLayout(prow)
+
+        f = QFormLayout()
+        self.role = QComboBox(); self.role.addItems(ROLES); self.role.setEditable(True)
+        self.difficulty = QComboBox()
+        for d in DIFFICULTIES:
+            self.difficulty.addItem(f"{d}  ({DIFF_DESC[d].split(' (')[0]})", d)
+        self.difficulty.setCurrentIndex(1)
+        self.tier = QComboBox(); self.tier.addItems(TIER_NAMES); self.tier.setCurrentText("Product unicorn")
+        self.tier.setToolTip("Startup → Indian product unicorns (Flipkart, Razorpay, Swiggy…) → "
+                             "Big Tech (Microsoft, Amazon, Atlassian, Uber) → Top tier (Google, Meta)")
+        self.company = QLineEdit(placeholderText="optional, e.g. Flipkart, Atlassian, Google")
+        self.round = QComboBox(); self.round.addItems(ROUNDS)
+        self.duration = QComboBox()
+        for m in DURATIONS:
+            self.duration.addItem(f"{m} min" if m < 60 else f"{m // 60} hr" + (f" {m % 60} min" if m % 60 else ""), m)
+        self.duration.setCurrentIndex(DURATIONS.index(45))
+        self.duration.setToolTip("The agenda (resume / theory / coding / machine coding / design) is planned to fit "
+                                 "this length, and the interview ends when time is up.")
+        self.focus = QLineEdit(placeholderText="e.g. React hooks, Kafka, K8s networking")
+        f.addRow("Role", self.role)
+        f.addRow("Difficulty", self.difficulty)
+        f.addRow("Company tier", self.tier)
+        f.addRow("Company", self.company)
+        f.addRow("Round", self.round)
+        f.addRow("Duration", self.duration)
+        f.addRow("Focus", self.focus)
+        v.addLayout(f)
+
+        rrow = QHBoxLayout()
+        rrow.addWidget(QLabel("Resume"))
+        self.resume_status = QLabel("")
+        self.resume_status.setStyleSheet("color:#9aa0ac; font-size:11px")
+        upload = QPushButton("Upload resume…")
+        upload.clicked.connect(self._upload_resume)
+        self.resume_view_btn = QPushButton("Analysis")
+        self.resume_view_btn.setToolTip("Show the claims Arjun will verify")
+        self.resume_view_btn.clicked.connect(self._show_resume_analysis)
+        rrow.addWidget(self.resume_status, 1); rrow.addWidget(upload); rrow.addWidget(self.resume_view_btn)
+        v.addLayout(rrow)
+        self.resume = QPlainTextEdit(placeholderText="Upload your resume (.pdf / .docx / .txt / .md) or paste it. "
+                                                     "Arjun will always grill your experience section.")
+        self.resume.textChanged.connect(self._refresh_resume_status)
+        v.addWidget(self.resume, 2)
+
+        jrow = QHBoxLayout()
+        jrow.addWidget(QLabel("Job description (optional)"))
+        loadj = QPushButton("Load file…")
+        loadj.clicked.connect(lambda: self._load_file(self.jd))
+        jrow.addStretch(); jrow.addWidget(loadj)
+        v.addLayout(jrow)
+        self.jd = QPlainTextEdit(placeholderText="Paste the JD to get company-specific questions")
+        v.addWidget(self.jd, 1)
+
+        f2 = QFormLayout()
+        self.model = QComboBox(); self.model.addItems(["sonnet", "opus", "haiku"])
+        self.model.setCurrentText(self.settings.claude_model)
+        self.voice = QComboBox()
+        for key, (_, _, label) in VOICES.items():
+            self.voice.addItem(label, key)
+        idx = self.voice.findData(voice_key(self.settings.voice, self.settings.voice_speaker))
+        self.voice.setCurrentIndex(max(idx, 0))
+        self.whisper = QComboBox(); self.whisper.addItems(["base.en", "small.en", "tiny.en"])
+        self.whisper.setCurrentText(self.settings.whisper_model)
+        self.speak = QCheckBox("Speak questions aloud", checked=self.settings.speak_questions)
+        self.live_fb = QCheckBox("Show feedback after each answer", checked=True)
+        self.use_cam = QCheckBox("Camera on: judge confidence && presence", checked=self.settings.use_camera)
+        self.use_cam.setToolTip("Webcam is analysed locally (eye contact, posture, fidgeting). Occasional snapshots "
+                                "go to Claude for feedback on expression and posture.")
+        self.use_cam.toggled.connect(self._camera_toggled)
+        f2.addRow("Claude model", self.model)
+        f2.addRow("Voice", self.voice)
+        f2.addRow("Speech model", self.whisper)
+        v.addLayout(f2)
+        v.addWidget(self.speak)
+        v.addWidget(self.live_fb)
+        v.addWidget(self.use_cam)
+
+        self.start_btn = QPushButton("Start interview", objectName="primary")
+        self.start_btn.clicked.connect(self.start_interview)
+        v.addWidget(self.start_btn)
+        return w
+
+    def _build_interview(self) -> QWidget:
+        w = QWidget()
+        v = QVBoxLayout(w)
+        top = QHBoxLayout()
+        self.agenda_lbl = QLabel("")
+        self.agenda_lbl.setWordWrap(True)
+        self.agenda_lbl.setTextFormat(Qt.RichText)
+        self.clock_lbl = QLabel("")
+        f = QFont(); f.setPointSize(18); f.setBold(True); self.clock_lbl.setFont(f)
+        top.addWidget(self.agenda_lbl, 1); top.addWidget(self.clock_lbl)
+        v.addLayout(top)
+        self.chat_view = QTextBrowser(openExternalLinks=True)
+        v.addWidget(self.chat_view, 3)
+
+        self.answer_tabs = QTabWidget()
+        self.answer = QPlainTextEdit()
+        self.answer.setPlaceholderText("Your spoken/typed answer. Ctrl+Space: mic on/off   Ctrl+Enter: submit   "
+                                       "Ctrl+H: hint   Ctrl+Shift+S: review my screen")
+        self.pad = QPlainTextEdit()
+        from PySide6.QtGui import QFontDatabase
+        mono = QFontDatabase.systemFont(QFontDatabase.FixedFont); mono.setPointSize(11)
+        self.pad.setFont(mono)
+        self.pad.setTabStopDistance(4 * self.pad.fontMetrics().horizontalAdvance(" "))
+        self.pad.setPlaceholderText("Code / design pad. Arjun reads this when you submit. Write code for coding "
+                                    "rounds; for system design, outline components, APIs, schema and numbers (or draw "
+                                    "in a whiteboard app and press 'Review my screen').")
+        self.answer_tabs.addTab(self.answer, "Answer")
+        self.answer_tabs.addTab(self.pad, "Code / design pad")
+        v.addWidget(self.answer_tabs, 2)
+
+        r1 = QHBoxLayout()
+        self.mic_btn = QPushButton("🎙  Start speaking", objectName="mic")
+        self.mic_btn.clicked.connect(self.toggle_mic)
+        self.submit_btn = QPushButton("Submit answer", objectName="primary")
+        self.submit_btn.clicked.connect(self.submit_answer)
+        r1.addWidget(self.mic_btn, 2)
+        r1.addWidget(self.submit_btn, 1)
+        v.addLayout(r1)
+
+        r2 = QHBoxLayout()
+        self.hint_btn = QPushButton("Hint")
+        self.hint_btn.clicked.connect(self.ask_hint)
+        self.repeat_btn = QPushButton("Repeat")
+        self.repeat_btn.clicked.connect(self.repeat_question)
+        self.screen_btn = QPushButton("Review my screen")
+        self.screen_btn.clicked.connect(lambda: self.review_screen(False))
+        self.region_btn = QPushButton("Review region…")
+        self.region_btn.clicked.connect(lambda: self.review_screen(True))
+        self.skip_btn = QPushButton("Skip")
+        self.skip_btn.clicked.connect(self.skip_question)
+        self.end_btn = QPushButton("End && report")
+        self.end_btn.clicked.connect(self.end_interview)
+        for btn in (self.hint_btn, self.repeat_btn, self.screen_btn, self.region_btn, self.skip_btn, self.end_btn):
+            r2.addWidget(btn)
+        v.addLayout(r2)
+        return w
+
+    def _build_side(self) -> QWidget:
+        self.tabs = QTabWidget()
+        self.fb_view = QTextBrowser(openExternalLinks=True)
+        self.report_view = QTextBrowser(openExternalLinks=True)
+        hist = QWidget()
+        hv = QVBoxLayout(hist)
+        self.hist_list = QListWidget()
+        self.hist_list.itemClicked.connect(self._open_history)
+        self.hist_view = QTextBrowser()
+        refresh = QPushButton("Refresh")
+        refresh.clicked.connect(self._load_history)
+        hv.addWidget(refresh)
+        hv.addWidget(self.hist_list, 1)
+        hv.addWidget(self.hist_view, 3)
+        side = QWidget()
+        sv = QVBoxLayout(side); sv.setContentsMargins(0, 0, 0, 0)
+        self.cam_view = QLabel("Camera off")
+        self.cam_view.setFixedSize(240, 180)
+        self.cam_view.setAlignment(Qt.AlignCenter)
+        self.cam_view.setStyleSheet("background:#1d2027; border:1px solid #2c313b; border-radius:6px; color:#6b7080")
+        self.cam_stats = QLabel("")
+        self.cam_stats.setStyleSheet("color:#9aa0ac; font-size:11px")
+        ch = QHBoxLayout(); ch.addWidget(self.cam_view); ch.addWidget(self.cam_stats, 1)
+        sv.addLayout(ch)
+        sv.addWidget(self.tabs, 1)
+        self.tabs.addTab(self.fb_view, "Feedback")
+        self.tabs.addTab(self.report_view, "Report")
+        self.tabs.addTab(hist, "History")
+        self._load_history()
+        return side
+
+    # ------------------------------------------------------------------ profiles
+    def _current_profile(self) -> Profile:
+        return Profile(
+            name=self.profile_box.currentText() or "Default", role=self.role.currentText(),
+            difficulty=self.difficulty.currentData(), tier=self.tier.currentText(),
+            company=self.company.text(), round=self.round.currentText(),
+            resume=self.resume.toPlainText(), jd=self.jd.toPlainText(), focus=self.focus.text(),
+            duration_min=self.duration.currentData(),
+        )
+
+    def _load_profile_names(self):
+        self.profile_box.clear()
+        self.profile_box.addItems(sorted(self.settings.profiles) or ["Default"])
+        if self.settings.profiles:
+            self._apply_profile(self.profile_box.currentText())
+
+    def _apply_profile(self, name: str):
+        p = self.settings.profiles.get(name)
+        if not p:
+            return
+        p = Profile(**{k: v for k, v in p.items() if k in Profile.__dataclass_fields__})
+        self.role.setCurrentText(p.role)
+        self.difficulty.setCurrentIndex(max(0, self.difficulty.findData(p.difficulty)))
+        self.tier.setCurrentText(p.tier); self.company.setText(p.company)
+        self.round.setCurrentText(p.round)
+        self.duration.setCurrentIndex(max(0, self.duration.findData(p.duration_min)))
+        self.focus.setText(p.focus); self.resume.setPlainText(p.resume); self.jd.setPlainText(p.jd)
+
+    def _save_profile(self):
+        name, ok = QInputDialog.getText(self, "Save profile", "Profile name (e.g. 'Backend - Java'):",
+                                        text=self.profile_box.currentText())
+        if not ok or not name.strip():
+            return
+        p = self._current_profile(); p.name = name.strip()
+        self.settings.profiles[p.name] = asdict(p)
+        self.settings.save()
+        self._load_profile_names()
+        self.profile_box.setCurrentText(p.name)
+
+    def _delete_profile(self):
+        name = self.profile_box.currentText()
+        if name in self.settings.profiles and QMessageBox.question(self, "Delete", f"Delete profile '{name}'?") \
+                == QMessageBox.Yes:
+            del self.settings.profiles[name]
+            self.settings.save()
+            self._load_profile_names()
+
+    def _load_file(self, target: QPlainTextEdit):
+        path, _ = QFileDialog.getOpenFileName(self, "Open", str(Path.home()),
+                                              "Documents (*.pdf *.docx *.txt *.md)")
+        if not path:
+            return False
+        try:
+            target.setPlainText(resume_mod.extract_text(path))
+            return True
+        except Exception as e:  # noqa: BLE001
+            self._on_error(f"Could not read file: {e}")
+            return False
+
+    # ------------------------------------------------------------------ resume
+    def _upload_resume(self):
+        if self._load_file(self.resume):
+            self._analyse_resume()
+
+    def _analyse_resume(self):
+        text = self.resume.toPlainText()
+        if not text.strip() or resume_mod.cached(text):
+            self._refresh_resume_status()
+            return
+        self.resume_status.setText("Analysing experience…")
+        model = self.model.currentText()
+
+        def work():
+            try:
+                self.b.resume_done.emit(resume_mod.analyze(text, model))
+            except Exception as e:  # noqa: BLE001
+                self.b.resume_done.emit({"_error": str(e)})
+        run_bg(self.b, work, busy=False)
+
+    def _on_resume_done(self, a: dict):
+        if a.get("_error"):
+            self.resume_status.setText("Analysis failed (will use raw text)")
+            self.b.status.emit("Resume analysis failed: " + a["_error"].splitlines()[0])
+            return
+        self._refresh_resume_status()
+        self._show_resume_analysis()
+
+    def _refresh_resume_status(self):
+        text = self.resume.toPlainText()
+        a = resume_mod.cached(text) if text.strip() else None
+        if a:
+            self.resume_status.setText(f"✓ {len(a.get('experiences', []))} roles · {resume_mod.claim_count(a)} claims"
+                                       f" · {len(a.get('red_flags', []))} red flags")
+        else:
+            self.resume_status.setText("not analysed yet" if text.strip() else "")
+        self.resume_view_btn.setEnabled(bool(a))
+
+    def _show_resume_analysis(self):
+        a = resume_mod.cached(self.resume.toPlainText())
+        if a:
+            self.tabs.setCurrentWidget(self.fb_view)
+            self.fb_view.setMarkdown(resume_mod.markdown(a))
+
+    # ------------------------------------------------------------------ interview flow
+    def start_interview(self):
+        self.settings.claude_model = self.model.currentText()
+        self.settings.voice, spk = self.voice.currentData().split("#")
+        self.settings.voice_speaker = int(spk) if spk else None
+        self.settings.whisper_model = self.whisper.currentText()
+        self.settings.speak_questions = self.speak.isChecked()
+        self.settings.use_camera = self.use_cam.isChecked()
+        if self.use_cam.isChecked():
+            self.start_camera()
+        self.settings.save()
+
+        if self.speaker:
+            self.speaker.stop()
+        self.session = Session(profile=self._current_profile(), model=self.settings.claude_model)
+        self.chat_view.clear(); self.fb_view.clear(); self.report_view.clear(); self.answer.clear()
+        self.pad.clear(); self._pad_snapshot = ""; self._time_up = False
+        self.agenda_lbl.setText("<i>Planning the agenda…</i>"); self.clock_lbl.setText("")
+        self.start_btn.setEnabled(False)
+        run_bg(self.b, self._prepare_and_ask)
+
+    def _prepare_and_ask(self):
+        self.ensure_models(self.b.status.emit)
+        p = self.session.profile
+        if p.resume.strip() and not resume_mod.cached(p.resume):
+            self.b.status.emit("Analysing your resume's experience section…")
+            try:
+                self.b.resume_done.emit(resume_mod.analyze(p.resume, self.session.model))
+            except Exception as e:  # noqa: BLE001
+                self.b.status.emit(f"Resume analysis failed, using raw text: {e}")
+        self.b.status.emit(f"Planning a {p.duration_min}-minute agenda…")
+        self.session.make_agenda()
+        self.session.clock_start = time.time()
+        self.b.agenda.emit(self.session.agenda)
+        self.b.ready.emit()
+        self._ask_next()
+
+    def ensure_models(self, status):
+        """Load speech + voice models (call from a background thread)."""
+        from .stt import Recorder, Transcriber
+        from .tts import Speaker
+
+        s = self.settings
+        if self.recorder is None:
+            self.recorder = Recorder()
+        if self.transcriber is None or getattr(self, "_whisper_name", None) != s.whisper_model:
+            status(f"Loading speech model {s.whisper_model} (first run downloads it)…")
+            self.transcriber = Transcriber(s.whisper_model)
+            self._whisper_name = s.whisper_model
+        key = voice_key(s.voice, s.voice_speaker)
+        if s.speak_questions and (self.speaker is None or getattr(self, "_voice_key", None) != key):
+            status("Loading voice…")
+            self.speaker = Speaker(s.voice, s.voice_speaker, s.speech_rate, progress=status)
+            self._voice_key = key
+
+    def _ask_next(self):
+        self.b.status.emit("Arjun is thinking of a question…")
+        turn = self.session.next_question()
+        self.b.question.emit(turn)
+
+    def _on_ready(self):
+        self._set_interview_enabled(True)
+
+    def _on_question(self, turn: Turn):
+        tag = {"followup": "Follow-up", "wrap": "Interviewer"}.get(turn.kind, f"Q{self.session.main_questions_asked}")
+        self._append_chat(f"Arjun · {tag}" + (f" · {turn.topic}" if turn.topic else ""), turn.question)
+        if self.speaker and self.speak.isChecked():
+            self.speaker.say(turn.question)
+        self.answer.clear()
+        self._turn_start, self._turn_audio = time.time(), {}
+        if turn.segment in CODE_SEGMENTS:
+            if turn.kind == "question" and self.pad.toPlainText().strip():
+                self.pad.clear()  # new problem: fresh pad (previous code is saved with its answer)
+            self.answer_tabs.setCurrentWidget(self.pad)
+            self.pad.setFocus()
+        else:
+            self.answer_tabs.setCurrentWidget(self.answer)
+        self._pad_snapshot = self.pad.toPlainText()
+        self._draw_agenda()
+        if turn.kind == "wrap":
+            self.end_interview()
+        else:
+            self.b.status.emit("Your turn. Ctrl+Space to talk, Ctrl+Enter to submit.")
+
+    def submit_answer(self):
+        if not self.session or not self.session.current or self._pending:
+            return
+        if self.recorder and self.recorder.recording:
+            self.toggle_mic(then_submit=True)
+            return
+        turn = self.session.current
+        turn.answer = self.answer.toPlainText().strip()
+        turn.code = self._pad_for(turn)
+        if not turn.answer and not turn.screenshots and not turn.code.strip():
+            self.b.status.emit("Say or type an answer first (or press Skip).")
+            return
+        turn.metrics = soft.delivery(turn.answer, getattr(self, "_turn_audio", {}))
+        if self.camera and self.camera.running:
+            turn.camera = self.camera.stats(getattr(self, "_turn_start", time.time() - 120))
+        if self.speaker:
+            self.speaker.stop()
+        self._append_chat("You", turn.answer or "(answered on screen)")
+        self.answer.clear()
+        # Evaluate and fetch the next question in parallel to cut waiting time.
+        run_bg(self.b, self._evaluate, turn)
+        run_bg(self.b, self._ask_next)
+
+    def _evaluate(self, turn: Turn):
+        self.session.evaluate(turn)
+        self.b.feedback.emit(turn)
+
+    def skip_question(self):
+        if not self.session or not self.session.current or self._pending:
+            return
+        self.session.current.answer = "(skipped)"
+        self._append_chat("You", "(skipped)")
+        run_bg(self.b, self._ask_next)
+
+    def repeat_question(self):
+        if self.session and self.session.current and self.speaker:
+            self.speaker.stop()
+            self.speaker.say(self.session.current.question)
+
+    def ask_hint(self):
+        if not self.session or not self.session.current:
+            return
+        turn = self.session.current
+        turn.answer = self.answer.toPlainText().strip()
+        turn.code = self._pad_for(turn)
+        self._stream_start("Hint")
+        run_bg(self.b, lambda: self.b.chat.emit("Hint", self.session.hint(turn, on_text=self.b.stream.emit)))
+
+    def review_screen(self, interactive: bool):
+        if not self.session or not self.session.current:
+            return
+        turn = self.session.current
+        turn.answer = self.answer.toPlainText().strip()
+        if not interactive:
+            self.showMinimized()
+        QTimer.singleShot(150 if interactive else 700, lambda: run_bg(self.b, self._capture_review, turn, interactive))
+
+    def _capture_review(self, turn: Turn, interactive: bool):
+        self.b.status.emit("Capturing screen…")
+        try:
+            shot = screen.capture(interactive=interactive)
+        finally:
+            self.b.restore.emit()
+        screen.cleanup()
+        self.b.status.emit("Arjun is looking at your screen…")
+        self.b.stream.emit("\x00Screen review")
+        note = self.session.review_screen(turn, shot, on_text=self.b.stream.emit)
+        self.b.chat.emit("Arjun · watching your screen", note)
+        if self.speaker and self.speak.isChecked():
+            self.speaker.say(note)
+
+    def end_interview(self):
+        if not self.session or not self.session.turns:
+            return
+        self._set_interview_enabled(False)
+        self._clock.stop()
+        self.tabs.setCurrentWidget(self.report_view)
+        self.report_view.setMarkdown("_Writing your report…_")
+
+        def work():
+            self.b.status.emit("Writing your final report…")
+            # Wait for in-flight evaluations / questions (this task counts as one).
+            while self._pending > 1:
+                time.sleep(0.3)
+            for t in self.session.turns:
+                if t.answer and t.answer != "(skipped)" and not t.feedback:
+                    self.session.evaluate(t)
+            buf = []
+
+            def chunk(c):
+                buf.append(c)
+                self.b.report.emit("".join(buf))
+            self.session.final_report(on_text=chunk)
+            self.b.report.emit(self.session.report)
+            path = self.session.save()
+            self.b.status.emit(f"Saved to {path}")
+        run_bg(self.b, work)
+
+    # ------------------------------------------------------------------ agenda & clock
+    def _pad_for(self, turn: Turn) -> str:
+        pad = self.pad.toPlainText()
+        return pad if (turn.segment in CODE_SEGMENTS or pad != getattr(self, "_pad_snapshot", "")) else ""
+
+    def _on_agenda(self, agenda):
+        self._draw_agenda()
+        self._clock.start()
+        self._tick()
+
+    def _draw_agenda(self):
+        s = self.session
+        if not s or not s.agenda:
+            return
+        cur, _ = s.segment_at()
+        parts = []
+        for i, seg in enumerate(s.agenda):
+            name = seg["title"].split(" (")[0]
+            if i < cur:
+                parts.append(f'<span style="color:#6b7080">✓ {name} {seg["minutes"]}m</span>')
+            elif i == cur:
+                parts.append(f'<span style="color:#7fb2ff;font-weight:600">▶ {name} {seg["minutes"]}m</span>')
+            else:
+                parts.append(f'<span style="color:#9aa0ac">{name} {seg["minutes"]}m</span>')
+        self.agenda_lbl.setText("  ·  ".join(parts))
+
+    def _tick(self):
+        s = self.session
+        if not s or not s.clock_start:
+            return
+        rem = s.remaining()
+        m, sec = divmod(max(0, int(rem)), 60)
+        h, m = divmod(m, 60)
+        self.clock_lbl.setText(f"{h}:{m:02d}:{sec:02d}" if h else f"{m:02d}:{sec:02d}")
+        self.clock_lbl.setStyleSheet(f"color:{'#c0392b' if rem <= 120 else '#c98a1b' if rem <= 300 else '#e6e6e6'}")
+        if int(s.elapsed()) % 15 == 0:
+            self._draw_agenda()
+        if rem <= 0 and not self._time_up:
+            self._time_up = True
+            self._clock.stop()
+            if self.recorder and self.recorder.recording:
+                self.recorder.stop(); self._set_mic_ui(False); self._level_timer.stop()
+            turn = s.current
+            if turn and not turn.answer:
+                turn.answer = self.answer.toPlainText().strip()
+                turn.code = self._pad_for(turn)
+                if turn.answer or turn.code.strip():
+                    turn.metrics = soft.delivery(turn.answer, getattr(self, "_turn_audio", {}))
+            msg = "That's time. Thanks, we'll stop here."
+            self._append_chat("Arjun", msg)
+            if self.speaker and self.speak.isChecked():
+                self.speaker.stop(); self.speaker.say(msg)
+            self.end_interview()
+
+    # ------------------------------------------------------------------ mic
+    def toggle_mic(self, then_submit: bool = False):
+        if not self.recorder or not self.session:
+            return
+        if not self.recorder.recording:
+            if self.speaker:
+                self.speaker.stop()
+            self.recorder.start()
+            self._level_timer.start()
+            self._set_mic_ui(True)
+            self.b.status.emit("Listening… press Ctrl+Space (or the button) when done.")
+            return
+        audio = self.recorder.stop()
+        self._level_timer.stop(); self.level_bar.setValue(0)
+        if self.camera and self.camera.running and self.session.current:
+            shot = self.camera.snapshot()
+            if shot:
+                self.session.current.camera_shots = (self.session.current.camera_shots + [str(shot)])[-2:]
+        self._set_mic_ui(False)
+        self.b.status.emit("Transcribing…")
+
+        def work():
+            text = self.transcriber.transcribe(audio)
+            if text:
+                self._turn_audio = soft.merge_audio_stats(getattr(self, "_turn_audio", {}), soft.audio_stats(audio))
+            self.b.transcript.emit(text)
+            if then_submit:
+                self.b.submit_now.emit()
+        run_bg(self.b, work, busy=False)
+
+    def _set_mic_ui(self, on: bool):
+        self.mic_btn.setText("⏹  Stop (transcribe)" if on else "🎙  Start speaking")
+        self.mic_btn.setProperty("rec", "true" if on else "false")
+        self.mic_btn.style().unpolish(self.mic_btn); self.mic_btn.style().polish(self.mic_btn)
+
+    def _update_level(self):
+        if self.recorder:
+            self.level_bar.setValue(int(self.recorder.level * 100))
+
+    def _on_transcript(self, text: str):
+        if text:
+            cur = self.answer.toPlainText().strip()
+            self.answer.setPlainText((cur + " " + text).strip())
+        self.b.status.emit("Got it. Edit if needed, then Ctrl+Enter to submit." if text else "Didn't catch that.")
+
+    # ------------------------------------------------------------------ rendering
+    def _append_chat(self, who: str, text: str):
+        color = "#7fb2ff" if who.startswith("Arjun") else "#7ee0a8" if who == "You" else "#f5c26b"
+        self.chat_view.append(
+            f'<p style="margin:10px 0 2px 0;color:{color};font-weight:600">{html.escape(who)}</p>'
+            f'<p style="margin:0 0 8px 0;line-height:140%">{html.escape(text).replace(chr(10), "<br>")}</p>'
+        )
+        self.chat_view.verticalScrollBar().setValue(self.chat_view.verticalScrollBar().maximum())
+
+    def _stream_start(self, title: str):
+        self._stream_buf = f"### {title}\n\n"
+        self.tabs.setCurrentWidget(self.fb_view)
+        self.fb_view.setMarkdown(self._stream_buf)
+
+    def _on_stream(self, chunk: str):
+        if chunk.startswith("\x00"):
+            self._stream_start(chunk[1:])
+            return
+        self._stream_buf = getattr(self, "_stream_buf", "") + chunk
+        self.fb_view.setMarkdown(self._stream_buf)
+
+    def _on_feedback(self, turn: Turn):
+        fb = turn.feedback
+        if not self.live_fb.isChecked() or not fb:
+            return
+        md = [f"### {fb.get('score', '?')}/10 · {fb.get('verdict', '')}", f"*{turn.question}*", ""]
+        if fb.get("authenticity"):
+            md += [f"**🔍 Resume claim check:** {fb['authenticity']}", ""]
+        if fb.get("trap_result"):
+            md += [f"**🪤 Trap:** {fb['trap_result']}", ""]
+        if fb.get("strengths"):
+            md += ["**Strengths**"] + [f"- {s}" for s in fb["strengths"]] + [""]
+        if fb.get("gaps"):
+            md += ["**Missed / wrong**"] + [f"- {s}" for s in fb["gaps"]] + [""]
+        md += ["**Model answer**", "", fb.get("model_answer", ""), ""]
+        if fb.get("tip"):
+            md += [f"**Delivery tip:** {fb['tip']}", ""]
+        md += soft_markdown(fb, turn.metrics, turn.camera)
+        self.tabs.setCurrentWidget(self.fb_view)
+        self.fb_view.setMarkdown("\n".join(md))
+
+    def _on_report(self, text: str):
+        self.report_view.setMarkdown(text)
+        if self.session and self.session.report and not self.builder.loop:
+            self.stop_camera()
+        self._load_history()
+        self.start_btn.setEnabled(True)
+
+    def _on_error(self, msg: str):
+        self.statusBar().showMessage("Error: " + msg.splitlines()[0])
+        QMessageBox.warning(self, "AlongSide", msg)
+        self.start_btn.setEnabled(True)
+        if self.session and self.session.turns:
+            self._set_interview_enabled(True)
+
+    def _on_busy(self, on: bool):
+        self._pending = max(0, self._pending + (1 if on else -1))
+        self.submit_btn.setEnabled(self._pending == 0 and self.session is not None)
+        self.skip_btn.setEnabled(self._pending == 0 and self.session is not None)
+
+    def _set_interview_enabled(self, on: bool):
+        for btn in (self.mic_btn, self.submit_btn, self.hint_btn, self.repeat_btn, self.screen_btn,
+                    self.region_btn, self.skip_btn, self.end_btn):
+            btn.setEnabled(on)
+
+    # ------------------------------------------------------------------ dashboard actions
+    def generate_plan(self, role: str, difficulty: str, tier: str):
+        f = progress.Filter(role=role, difficulty=difficulty)
+        areas = progress.by_area(f)
+        if not areas:
+            QMessageBox.information(self, "AlongSide", "Complete at least one scored interview first.")
+            return
+        gaps = {a["area"]: progress.recent_gaps(f, a["area"]) for a in areas[:6]}
+        self.dashboard.show_plan("_Claude is writing your plan…_")
+        model = self.model.currentText()
+
+        def work():
+            buf = []
+
+            def chunk(c):
+                buf.append(c)
+                self.b.plan.emit("".join(buf))
+            text = improvement_plan(role, areas, gaps, difficulty, tier, model, on_text=chunk,
+                                    soft=progress.soft_summary(f), soft_lacking=progress.soft_lacking(f))
+            progress.save_plan(role, text)
+            self.b.plan.emit(text)
+        run_bg(self.b, work, busy=False)
+
+    def practice_area(self, role: str, difficulty: str, tier: str, area: str):
+        if role:
+            self.role.setCurrentText(role)
+        if difficulty:
+            self.difficulty.setCurrentIndex(max(0, self.difficulty.findData(difficulty)))
+        self.tier.setCurrentText(tier)
+        self.focus.setText(area)
+        self.round.setCurrentText("Concepts deep-dive")
+        self.main_tabs.setCurrentIndex(0)
+        self.statusBar().showMessage(f"Set up a {area} drill. Press Start interview when ready.")
+
+    # ------------------------------------------------------------------ history
+    def _load_history(self):
+        self.hist_list.clear()
+        for p in sorted(SESSIONS_DIR.glob("*.md"), reverse=True):
+            self.hist_list.addItem(p.stem)
+
+    def _open_history(self, item):
+        self.hist_view.setMarkdown((SESSIONS_DIR / f"{item.text()}.md").read_text())
+
+    # ------------------------------------------------------------------ camera
+    def start_camera(self):
+        if self.camera is None:
+            self.camera = soft.CameraTracker()
+        self.camera.start()
+        self._cam_timer.start()
+
+    def stop_camera(self):
+        if self.camera:
+            self.camera.stop()
+        self._cam_timer.stop()
+        for lbl in (self.cam_view, self.builder.cam_view):
+            lbl.clear(); lbl.setText("Camera off")
+        self.cam_stats.setText("")
+
+    def _camera_toggled(self, on: bool):
+        self.settings.use_camera = on
+        self.settings.save()
+        if on and (self.session or self.builder.loop):
+            self.start_camera()
+        elif not on:
+            self.stop_camera()
+
+    def _update_camera(self):
+        cam = self.camera
+        if not cam:
+            return
+        if cam.error:
+            self.cam_view.setText("Camera error")
+            self.cam_stats.setText(cam.error)
+            self._cam_timer.stop()
+            return
+        data = cam.preview_rgb()
+        if not data:
+            return
+        buf, w, h = data
+        pix = QPixmap.fromImage(QImage(buf, w, h, 3 * w, QImage.Format_RGB888).copy())
+        for lbl in (self.cam_view, self.builder.cam_view):
+            if lbl.isVisible():
+                lbl.setPixmap(pix)
+        st = cam.stats(time.time() - 60)
+        if st:
+            txt = (f"Last minute\nIn frame: {st['presence']}%\nEye contact: {st['eye_contact']}%\n"
+                   f"Fidget: {st['fidget']}")
+            self.cam_stats.setText(txt)
+            self.builder.cam_stats.setText(txt.replace("\n", "  ·  ").replace("Last minute  ·  ", ""))
+
+    def closeEvent(self, e):
+        self.stop_camera()
+        self.builder.shutdown()
+        if self.speaker:
+            self.speaker.stop()
+        if self.recorder and self.recorder.recording:
+            self.recorder.stop()
+        if self.session and self.session.turns and not self.session.report:
+            self.session.save()
+        super().closeEvent(e)
+
+
+def soft_markdown(fb: dict, metrics: dict, camera: dict) -> list[str]:
+    """Markdown block for the 'Communication & confidence' part of feedback."""
+    sk = fb.get("soft_skills") or {}
+    dims = [(k, sk.get(k)) for k in soft.SOFT_SKILLS if isinstance(sk.get(k), (int, float))]
+    md = ["---", "### Communication & confidence"]
+    if dims:
+        md += [" · ".join(f"**{k}** {v}/10" for k, v in dims), ""]
+    line = []
+    if metrics.get("spoken"):
+        line += [f"{metrics.get('wpm')} wpm", f"{metrics.get('fillers')} fillers",
+                 f"{metrics.get('hedges')} hedges", f"longest pause {metrics.get('longest_pause')}s"]
+    if camera:
+        line += [f"eye contact {camera.get('eye_contact')}%", f"in frame {camera.get('presence')}%"]
+    if line:
+        md += ["_" + " · ".join(line) + "_", ""]
+    lacking = list(sk.get("lacking", [])) + list(fb.get("delivery_flags", []))
+    if lacking:
+        md += ["**Lacking**"] + [f"- {x}" for x in lacking] + [""]
+    if sk.get("good"):
+        md += ["**Good**"] + [f"- {x}" for x in sk["good"]]
+    return md if len(md) > 2 else []
+
+
+def main():
+    app = QApplication(sys.argv)
+    app.setApplicationName("AlongSide")
+    app.setDesktopFileName("alongside")
+    font = app.font()
+    font.setPointSize(10)
+    app.setFont(font)
+    app.setStyleSheet(STYLE)
+    w = MainWindow()
+    w.show()
+    sys.exit(app.exec())
