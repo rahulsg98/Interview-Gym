@@ -64,17 +64,36 @@ For the camera to work well, sit **facing** a light source, not with a window or
 | Screen capture | xdg-desktop-portal Screenshot | Built in |
 | Data | SQLite at `~/.local/share/alongside/progress.db`, sessions in `~/.local/share/alongside/sessions` | Local |
 
-## Setup
+## Setup (one time only)
+
+Run these once from the project folder:
 
 ```bash
-claude            # one time: log in with /login, then /exit
-./run.sh          # creates .venv on first run and starts the app
-./install-desktop.sh   # optional: adds AlongSide to the app launcher
+claude                 # log in: type /login, choose "Claude account with subscription", then /exit
+./run.sh               # first run creates .venv, installs dependencies and starts the app
+./install-desktop.sh   # adds AlongSide (with its icon) to the Applications menu
 ```
 
 On the first run, the app downloads the Whisper model (~250 MB), the voice (~75 MB) and the face model (0.2 MB).
 
 The first time you use screen review, GNOME asks for screenshot permission. Choose **Allow**.
+
+## Opening the app (every day)
+
+**You don't need the terminal.** After the one-time setup, AlongSide is a normal app and stays installed after restarts and power-offs:
+
+1. Press the **Super** (Windows) key or click **Activities**.
+2. Type **AlongSide** and press **Enter**.
+
+Tip: right-click the icon in the dock and choose **Pin to Dash** for one-click access.
+
+Your login, profiles, resume analyses, history and dashboard data are kept in `~/.local/share/alongside`, so nothing is lost when you close the app or restart.
+
+### When you would use the terminal
+- **To see errors live while troubleshooting:** `./run.sh` from the project folder. Errors also always appear in a pop-up and in `~/.local/share/alongside/alongside.log`.
+- **If Claude asks you to log in again** (questions fail with a "log in" error): run `claude`, then `/login`.
+- **If you move or rename the project folder:** run `./install-desktop.sh` again from the new location so the launcher points to it.
+- **After pulling updates from GitHub:** if `requirements.txt` changed, run `.venv/bin/pip install -r requirements.txt`.
 
 ## Keys (Interview tab)
 - **Ctrl+Space:** mic on/off
