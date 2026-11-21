@@ -138,6 +138,9 @@ class Session:
     agenda: list[dict] = field(default_factory=list)  # [{kind, title, minutes, focus}]
     clock_start: float = 0.0
     aborted: bool = False   # ended early by the candidate: never scored, saved or analysed
+    ended: float = 0.0
+    loop_id: str = ""       # set when this session is one round of a Round Builder loop
+    kind: str = "interview"
 
     COMPLETE_FRACTION = 0.9  # ending after 90% of the time still counts as a completed interview
 
@@ -434,6 +437,8 @@ real depth (only if a resume segment happened).
         return f"{stamp}_{self.profile.role.split()[0].lower()}"
 
     def save(self) -> Path:
+        if not self.ended:
+            self.ended = time.time()
         base = SESSIONS_DIR / self.id
         base.with_suffix(".json").write_text(json.dumps(asdict(self), indent=2))
         progress.record_session(self, self.id, str(base.with_suffix(".md")))

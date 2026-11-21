@@ -37,11 +37,12 @@ A Round Builder loop is completed when every selected round has finished.
 
 Anything ended earlier is **discarded**: no report, no history entry and nothing added to the Dashboard. You'll be asked to confirm before it's thrown away. Closing the app mid-interview also discards it.
 
-## Three tabs
+## Tabs
 
 | Tab | What it does |
 |---|---|
 | **Interview** | A question-by-question mock tailored to your resume or job description, role, difficulty and company tier. After each answer you get a score, a trap verdict, the gaps, a model answer, and soft-skill feedback. |
+| **Past Interviews** | Every completed interview and company loop, titled with its date and time, mode, role, difficulty and duration (planned and actual), plus its score. Search and filter the list. Click an entry for **Feedback** (per question or round: score, traps, resume claim checks, gaps, soft skills, model answers), the **Report**, the full **History** transcript, and **Learnings**: for every question, your actual answer next to a detailed ideal answer, key points, where you fell short, a 60-90 s "how to say it" version, likely follow-ups with answers, and what to study next. Learnings are written automatically after each completed interview; older ones have a **Generate learnings** button. Each entry can also be opened as a file or deleted. |
 | **Round Builder** | Enter a company. Claude researches the company's real interview loop on the web (LeetCode Discuss, GfG, Glassdoor, blogs) and lists the rounds with questions candidates reported. AlongSide then creates *similar* (not identical) problems and runs a **timed, hands-free loop**. The interviewer hears you out before replying, watches the built-in code editor, and gives a hiring-committee debrief at the end. |
 | **Dashboard** | Progress by field and difficulty: score trend, weakest areas, a readiness matrix (difficulty × company tier) and a "next step" suggestion. It has a **Soft skills** section with pace, filler words, eye contact, dimension scores and what you're lacking, plus an improvement plan written by Claude. |
 

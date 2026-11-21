@@ -18,7 +18,7 @@ import traceback
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-DONE_RE = re.compile(r"\b(i'?m done|i am done|that'?s (it|all|my answer)|that is (it|all|my answer)|done with (my|the|this) "
+DONE_RE = re.compile(r"\b((i'?m|i am) done with (my|the|this) (answer|solution|code)|i'?m done|i am done|that'?s (it|all|my answer)|that is (it|all|my answer)|done with (my|the|this) "
                      r"(answer|solution|code)|next question|move on|let'?s move on|i'?m finished|finished)\b", re.I)
 BACKCHANNELS = ["Mm-hmm.", "Okay.", "Go on.", "Right.", "Hmm, okay."]
 

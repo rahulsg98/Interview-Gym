@@ -76,6 +76,7 @@ class Bridge(QObject):
     restore = Signal()
     submit_now = Signal()
     plan = Signal(str)
+    saved = Signal(str)
     hint_ready = Signal(str)
     agenda = Signal(object)
     resume_done = Signal(object)
@@ -122,6 +123,12 @@ class MainWindow(QMainWindow):
         sp_lay.addWidget(split)
         self.iv_stack.addWidget(setup_page)
         self.main_tabs.addTab(root, "Interview")
+        from .reports import PastInterviews
+        self.interviews = PastInterviews()
+        self.interviews.setObjectName("root")
+        self.main_tabs.addTab(self.interviews, "Past Interviews")
+        self.interviews.changed.connect(lambda: self.dashboard.refresh())
+        self.interviews.model_getter = lambda: self.model.currentText()
         from .builder import RoundBuilder
         self.builder = RoundBuilder(self)
         self.builder.setObjectName("root")
@@ -170,6 +177,7 @@ class MainWindow(QMainWindow):
         b.submit_now.connect(self.submit_answer)
         b.plan.connect(self.dashboard.show_plan)
         b.agenda.connect(self._on_agenda)
+        b.saved.connect(self._on_saved)
         b.hint_ready.connect(self._on_hint)
         b.resume_done.connect(self._on_resume_done)
         self._clock = QTimer(self, interval=1000, timeout=self._tick)
@@ -429,17 +437,12 @@ class MainWindow(QMainWindow):
     def _build_side(self) -> QWidget:
         self.tabs = QTabWidget()
         self.fb_view = QTextBrowser(openExternalLinks=True)
-        self.report_view = QTextBrowser(openExternalLinks=True)
-        hist = QWidget()
-        hv = QVBoxLayout(hist)
-        self.hist_list = QListWidget()
-        self.hist_list.itemClicked.connect(self._open_history)
-        self.hist_view = QTextBrowser()
-        refresh = QPushButton("Refresh")
-        refresh.clicked.connect(self._load_history)
-        hv.addWidget(refresh)
-        hv.addWidget(self.hist_list, 1)
-        hv.addWidget(self.hist_view, 3)
+        self.fb_view.setMarkdown(
+            "### Get ready\n\n"
+            "1. **Upload resume…** and wait for ✓. Press **Analysis** to see the claims Arjun will verify.\n"
+            "2. Pick role, difficulty, company tier, round and **duration**.\n"
+            "3. Wear headphones, sit facing a light, and press **Start interview**.\n\n"
+            "Feedback, reports and full history of every completed interview are in the **Past Interviews** tab.")
         side = QWidget()
         sv = QVBoxLayout(side); sv.setContentsMargins(0, 0, 0, 0)
         self.cam_view = QLabel("Camera off")
@@ -451,10 +454,7 @@ class MainWindow(QMainWindow):
         ch = QHBoxLayout(); ch.addWidget(self.cam_view); ch.addWidget(self.cam_stats, 1)
         sv.addLayout(ch)
         sv.addWidget(self.tabs, 1)
-        self.tabs.addTab(self.fb_view, "Feedback")
-        self.tabs.addTab(self.report_view, "Report")
-        self.tabs.addTab(hist, "History")
-        self._load_history()
+        self.tabs.addTab(self.fb_view, "Preparation")
         return side
 
     # ------------------------------------------------------------------ profiles
@@ -578,7 +578,7 @@ class MainWindow(QMainWindow):
         if self.speaker:
             self.speaker.stop()
         self.session = Session(profile=self._current_profile(), model=self.settings.claude_model)
-        self.chat_view.clear(); self.fb_view.clear(); self.report_view.clear(); self.answer.clear()
+        self.chat_view.clear(); self.answer.clear()
         self.pad.clear(); self._pad_snapshot = ""; self._time_up = False
         self.agenda_lbl.setText("<i>Planning the agenda…</i>"); self.clock_lbl.setText("")
         self.q_card.setText("<i>Getting ready: loading voice and planning your agenda…</i>")
@@ -687,7 +687,7 @@ class MainWindow(QMainWindow):
             self.toggle_mic(then_submit=True)
             return
         turn = self.session.current
-        turn.answer = self.answer.toPlainText().strip()
+        turn.answer = _strip_done(self.answer.toPlainText().strip())
         turn.code = self._pad_for(turn)
         if not turn.answer and not turn.screenshots and not turn.code.strip():
             self.b.status.emit("Say or type an answer first (or press Skip).")
@@ -801,9 +801,12 @@ class MainWindow(QMainWindow):
         self._set_interview_enabled(False)
         self._clock.stop()
         self._stop_live()
-        self.iv_stack.setCurrentIndex(0)  # back to the setup screen, where the analysis lives
-        self.tabs.setCurrentWidget(self.report_view)
-        self.report_view.setMarkdown("_Writing your report…_")
+        self.iv_stack.setCurrentIndex(0)
+        p = self.session.profile
+        self.main_tabs.setCurrentWidget(self.interviews)  # the report is written straight into Past Interviews
+        self.interviews.show_pending(
+            f"{time.strftime('%d %b %Y · %H:%M', time.localtime(self.session.started))}  ·  Interview · {p.round}"
+            f"  ·  {p.duration_min} min planned")
 
         def work():
             self.b.status.emit("Writing your final report…")
@@ -820,8 +823,8 @@ class MainWindow(QMainWindow):
                 self.b.report.emit("".join(buf))
             self.session.final_report(on_text=chunk)
             self.b.report.emit(self.session.report)
-            path = self.session.save()
-            self.b.status.emit(f"Saved to {path}")
+            self.session.save()
+            self.b.saved.emit(self.session.id)
         run_bg(self.b, work)
 
     # ------------------------------------------------------------------ agenda & clock
@@ -975,11 +978,15 @@ class MainWindow(QMainWindow):
         self.fb_toggle.setText(f"📊 Feedback · last {fb.get('score', '?')}/10")
 
     def _on_report(self, text: str):
-        self.report_view.setMarkdown(text)
+        self.interviews.set_pending_report(text)
         if self.session and self.session.report and not self.builder.loop:
             self.stop_camera()
-        self._load_history()
         self.start_btn.setEnabled(True)
+
+    def _on_saved(self, session_id: str):
+        self.interviews.refresh(select_id=session_id)
+        self.interviews.generate_learnings(session_id)  # detailed study notes, in the background
+        self.statusBar().showMessage("Interview saved. Its feedback, report and history are in Past Interviews.")
 
     def _on_error(self, msg: str):
         self._asking = False
@@ -1137,14 +1144,6 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Set up a {area} drill. Press Start interview when ready.")
 
     # ------------------------------------------------------------------ history
-    def _load_history(self):
-        self.hist_list.clear()
-        for p in sorted(SESSIONS_DIR.glob("*.md"), reverse=True):
-            self.hist_list.addItem(p.stem)
-
-    def _open_history(self, item):
-        self.hist_view.setMarkdown((SESSIONS_DIR / f"{item.text()}.md").read_text())
-
     # ------------------------------------------------------------------ camera
     def start_camera(self):
         if self.camera is None:
@@ -1202,6 +1201,13 @@ class MainWindow(QMainWindow):
         if self.session and not self.session.report:
             self.session.aborted = True  # closed mid-interview: discard, never saved or analysed
         super().closeEvent(e)
+
+
+def _strip_done(answer: str) -> str:
+    """Drop a trailing spoken 'I'm done' / 'that's my answer' from the transcript."""
+    import re
+    from .live import DONE_RE
+    return re.sub(r"[\s,.]*(" + DONE_RE.pattern + r")[\s.!]*$", "", answer, flags=re.I).strip()
 
 
 def soft_markdown(fb: dict, metrics: dict, camera: dict) -> list[str]:

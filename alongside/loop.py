@@ -328,6 +328,10 @@ what's lacking, and drills to fix it.
         self.report = llm.ask(prompt, COACH_SYSTEM, self.model, on_text=on_text)
         return self.report
 
+    @property
+    def id(self) -> str:
+        return f"{time.strftime('%Y%m%d-%H%M%S', time.localtime(self.started))}_{_slug(self.company)}-loop"
+
     def save_round(self, r: LoopRound) -> None:
         """Store the round in the progress DB / history so it shows up on the dashboard."""
         if not r.result:
@@ -336,6 +340,9 @@ what's lacking, and drills to fix it.
                                     company=self.company, round=f"{self.company} · {r.name}", questions=1),
                     model=self.model)
         s.started = r.started
+        s.ended = r.ended or time.time()
+        s.loop_id = self.id
+        s.kind = "loop-round"
         said = " ".join(t for _, who, t in r.log if who == "You")
         turn = Turn(question=f"{r.problem.get('title', r.name)}\n\n{r.problem.get('statement', '')}",
                     topic=r.type, area=r.result.get("area") if r.result.get("area") in AREAS else r.problem.get("area", ""),
@@ -348,8 +355,15 @@ what's lacking, and drills to fix it.
         s.save()
 
     def save_report(self) -> None:
-        path = DATA_DIR / "sessions" / f"{time.strftime('%Y%m%d-%H%M%S', time.localtime(self.started))}_" \
-                                       f"{_slug(self.company)}-loop.md"
+        path = DATA_DIR / "sessions" / f"{self.id}.md"
+        rounds = [{"name": r.name, "type": r.type, "duration_min": r.duration_min, "started": r.started,
+                   "ended": r.ended, "problem": r.problem, "log": r.log, "code": r.code, "result": r.result}
+                  for r in self.rounds]
+        path.with_suffix(".json").write_text(json.dumps({
+            "kind": "loop", "id": self.id, "company": self.company, "role": self.role,
+            "difficulty": self.difficulty, "tier": self.tier, "started": self.started, "ended": time.time(),
+            "report": self.report, "rounds": rounds, "research_summary": self.research.get("summary", "")},
+            indent=2))
         md = [f"# {self.company} mock loop · {self.role} · {self.difficulty}", ""]
         for r in self.rounds:
             if not r.result:

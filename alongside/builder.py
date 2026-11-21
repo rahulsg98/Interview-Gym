@@ -36,6 +36,7 @@ class LiveBridge(QObject):
     report = Signal(str)
     error = Signal(str)
     screen_shot = Signal(object)
+    saved = Signal(str)
 
 
 class RoundBuilder(QWidget):
@@ -86,6 +87,7 @@ class RoundBuilder(QWidget):
         b.round_done.connect(self._on_round_done)
         b.report.connect(lambda t: self.report_view.setMarkdown(t))
         b.error.connect(self._on_error)
+        b.saved.connect(self._on_saved)
         b.screen_shot.connect(lambda shot: self._request_reaction("screen", [shot]))
 
         self.clock = QTimer(self, interval=1000, timeout=self._tick)
@@ -297,8 +299,11 @@ class RoundBuilder(QWidget):
         w = QWidget(); v = QVBoxLayout(w)
         h = QHBoxLayout()
         t = QLabel("Loop debrief"); t.setFont(_font(18, True)); h.addWidget(t); h.addStretch()
+        self.view_btn = QPushButton("Open in Past Interviews")
+        self.view_btn.setEnabled(False)
+        self.view_btn.clicked.connect(self._open_in_past)
         back = QPushButton("Back to Round Builder"); back.clicked.connect(lambda: self.stack.setCurrentIndex(0))
-        h.addWidget(back)
+        h.addWidget(self.view_btn); h.addWidget(back)
         v.addLayout(h)
         self.report_view = QTextBrowser(openExternalLinks=True)
         v.addWidget(self.report_view)
@@ -331,6 +336,7 @@ class RoundBuilder(QWidget):
         self.loop.resume_brief = resume_mod.brief(info) if info else self.host.resume.toPlainText()[:5000]
         self.idx = -1
         self.loop_finished = False
+        self.view_btn.setEnabled(False)
         self.conv_view.clear(); self.problem_view.clear(); self.report_view.clear()
         self.stack.setCurrentIndex(1)
         self._set_state("Loading speech models…")
@@ -507,12 +513,24 @@ class RoundBuilder(QWidget):
                 done = [r for r in self.loop.rounds if r.result]
                 for r in done:  # completed loop: now (and only now) record every round
                     self.loop.save_round(r)
+                self.b.saved.emit(self.loop.id)
                 head = "\n".join(f"- **{r.name}**: {r.result.get('score')}/10 · {r.result.get('decision', '')}"
                                  for r in done)
                 self.b.report.emit(f"### Round scores\n{head}\n\n---\n\n{self.loop.report}")
             except Exception as e:  # noqa: BLE001
                 traceback.print_exc(); self.b.error.emit(str(e))
         threading.Thread(target=work, daemon=True).start()
+
+    def _on_saved(self, loop_id: str):
+        self._saved_id = loop_id
+        self.view_btn.setEnabled(True)
+        self.host.interviews.refresh(select_id=loop_id)
+        self.host.interviews.generate_learnings(loop_id)
+        self.b.status.emit("Loop saved. Its feedback, debrief and history are in Past Interviews.")
+
+    def _open_in_past(self):
+        self.host.interviews.refresh(select_id=getattr(self, "_saved_id", None))
+        self.host.main_tabs.setCurrentWidget(self.host.interviews)
 
     def toggle_pause(self):
         self.paused = not self.paused
