@@ -11,6 +11,7 @@ Comment=Mock interview practice
 Exec="$dir/run.sh"
 Icon=audio-input-microphone
 Terminal=false
-Categories=Education;Development;
+Categories=Development;
+StartupWMClass=alongside
 DESK
 echo "Installed. Search for 'AlongSide' in Activities."
