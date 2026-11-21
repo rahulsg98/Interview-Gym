@@ -9,4 +9,10 @@ if [[ ! -d .venv ]]; then
 fi
 # Hide noisy but harmless Qt/Wayland warnings (text-input focus chatter, portal app-ID registration).
 export QT_LOGGING_RULES="${QT_LOGGING_RULES:-qt.qpa.wayland.textinput=false;qt.qpa.services=false}"
-exec .venv/bin/python -m alongside "$@"
+set +e
+.venv/bin/python -m alongside "$@"
+code=$?
+if [[ $code -ne 0 ]]; then
+  echo "AlongSide stopped with exit code $code. Details: ~/.local/share/alongside/alongside.log and crash.log" >&2
+fi
+exit $code

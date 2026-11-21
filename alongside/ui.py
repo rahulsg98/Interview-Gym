@@ -14,7 +14,7 @@ from PySide6.QtGui import QAction, QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QFileDialog, QFormLayout, QHBoxLayout, QInputDialog, QLabel,
     QLineEdit, QListWidget, QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
-    QSpinBox, QSplitter, QTabWidget, QTextBrowser, QVBoxLayout, QWidget,
+    QSpinBox, QSplitter, QTabWidget, QTextBrowser, QVBoxLayout, QWidget, QScrollArea, QFrame,
 )
 
 from . import screen
@@ -45,6 +45,12 @@ QScrollArea, QScrollArea > QWidget > QWidget { background: #14161b; }
 QTableWidget { background: #1d2027; color: #e6e6e6; }
 QHeaderView::section { background: #1d2027; color: #9aa0ac; border: none; padding: 4px; }
 QTableCornerButton::section { background: #1d2027; border: none; }
+QScrollBar:vertical { background: #14161b; width: 10px; margin: 0; }
+QScrollBar::handle:vertical { background: #3a404d; border-radius: 4px; min-height: 30px; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+QScrollBar:horizontal { background: #14161b; height: 10px; margin: 0; }
+QScrollBar::handle:horizontal { background: #3a404d; border-radius: 4px; min-width: 30px; }
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
 QTabWidget::pane { border: 1px solid #2c313b; border-radius: 6px; }
 QTabBar::tab { background: #1d2027; color: #c9ccd3; padding: 7px 14px; }
 QTabBar::tab:selected { background: #2a2f3a; color: white; }
@@ -117,7 +123,16 @@ class MainWindow(QMainWindow):
         self.main_tabs.currentChanged.connect(lambda i: self.main_tabs.widget(i) is self.dashboard and self.dashboard.refresh())
         self.dashboard.plan_requested.connect(self.generate_plan)
         self.dashboard.practice_requested.connect(self.practice_area)
-        split.addWidget(self._build_setup())
+        setup_scroll = QScrollArea(widgetResizable=True)
+        setup_scroll.setFrameShape(QFrame.NoFrame)
+        setup_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        setup_scroll.setWidget(self._build_setup())
+        setup_scroll.setMinimumWidth(320)
+        left = QWidget()
+        lv = QVBoxLayout(left); lv.setContentsMargins(0, 0, 0, 0)
+        lv.addWidget(setup_scroll, 1)
+        lv.addWidget(self.start_btn)  # pinned so it's always visible
+        split.addWidget(left)
         split.addWidget(self._build_interview())
         split.addWidget(self._build_side())
         split.setSizes([330, 600, 390])
@@ -259,7 +274,6 @@ class MainWindow(QMainWindow):
 
         self.start_btn = QPushButton("Start interview", objectName="primary")
         self.start_btn.clicked.connect(self.start_interview)
-        v.addWidget(self.start_btn)
         return w
 
     def _build_interview(self) -> QWidget:
@@ -924,7 +938,32 @@ def soft_markdown(fb: dict, metrics: dict, camera: dict) -> list[str]:
     return md if len(md) > 2 else []
 
 
+def _install_crash_logging():
+    """Never die silently: log uncaught errors and hard crashes to a file and the terminal."""
+    import faulthandler
+    import logging
+    from .config import DATA_DIR
+    log_path = DATA_DIR / "alongside.log"
+    logging.basicConfig(filename=log_path, level=logging.INFO,
+                        format="%(asctime)s %(levelname)s %(message)s")
+    crash_file = open(DATA_DIR / "crash.log", "a")  # noqa: SIM115 (kept open for faulthandler)
+    faulthandler.enable(file=crash_file, all_threads=True)
+    faulthandler.enable(file=sys.stderr, all_threads=True)
+    logging.info("AlongSide starting")
+
+    def hook(exc_type, exc, tb):
+        text = "".join(traceback.format_exception(exc_type, exc, tb))
+        logging.error("Uncaught exception:\n%s", text)
+        print(text, file=sys.stderr)
+        app = QApplication.instance()
+        if app:
+            QMessageBox.critical(None, "AlongSide error", f"{exc_type.__name__}: {exc}\n\nDetails: {log_path}")
+    sys.excepthook = hook
+    threading.excepthook = lambda a: hook(a.exc_type, a.exc_value, a.exc_traceback)
+
+
 def main():
+    _install_crash_logging()
     app = QApplication(sys.argv)
     app.setApplicationName("AlongSide")
     app.setDesktopFileName("alongside")
@@ -933,5 +972,8 @@ def main():
     app.setFont(font)
     app.setStyleSheet(STYLE)
     w = MainWindow()
-    w.show()
-    sys.exit(app.exec())
+    w.showMaximized()
+    code = app.exec()
+    import logging
+    logging.info("AlongSide exited with code %s", code)
+    sys.exit(code)
