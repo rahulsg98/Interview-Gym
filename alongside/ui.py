@@ -588,18 +588,23 @@ class MainWindow(QMainWindow):
         run_bg(self.b, self._prepare_and_ask)
 
     def _prepare_and_ask(self):
+        s = self.session  # keep a local handle: the user may end/discard while we're preparing
         self.ensure_models(self.b.status.emit)
-        p = self.session.profile
+        p = s.profile
         if p.resume.strip() and not resume_mod.cached(p.resume):
             self.b.status.emit("Analysing your resume's experience section…")
             try:
-                self.b.resume_done.emit(resume_mod.analyze(p.resume, self.session.model))
+                self.b.resume_done.emit(resume_mod.analyze(p.resume, s.model))
             except Exception as e:  # noqa: BLE001
                 self.b.status.emit(f"Resume analysis failed, using raw text: {e}")
+        if s.aborted:
+            return
         self.b.status.emit(f"Planning a {p.duration_min}-minute agenda…")
-        self.session.make_agenda()
-        self.session.clock_start = time.time()
-        self.b.agenda.emit(self.session.agenda)
+        s.make_agenda()
+        if s.aborted:
+            return
+        s.clock_start = time.time()
+        self.b.agenda.emit(s.agenda)
         self.b.ready.emit()
         self._ask_next()
 
@@ -622,22 +627,32 @@ class MainWindow(QMainWindow):
             self._voice_key = key
 
     def _ask_next(self):
+        s = self.session
+        if not s or s.aborted:
+            return
         self._asking = True
         self.b.status.emit("Arjun is thinking of a question…")
         try:
-            turn = self.session.next_question()
+            turn = s.next_question()
         except Exception:
             self._asking = False
+            if s.aborted:
+                return
             raise
         self._asking = False
-        self.b.question.emit(turn)
+        if not s.aborted:
+            self.b.question.emit(turn)
 
     def _on_ready(self):
+        if not self.session or self.session.aborted:
+            return
         self._set_interview_enabled(True)
         if self.hands_free.isChecked():
             self._start_live()
 
     def _on_question(self, turn: Turn):
+        if not self.session or self.session.aborted or turn not in self.session.turns:
+            return
         tag = {"followup": "Follow-up", "wrap": "Interviewer"}.get(turn.kind, f"Q{self.session.main_questions_asked}")
         self._append_chat(f"Arjun · {tag}" + (f" · {turn.topic}" if turn.topic else ""), turn.question)
         if self.live:
@@ -693,8 +708,10 @@ class MainWindow(QMainWindow):
         run_bg(self.b, self._ask_next)
 
     def _evaluate(self, turn: Turn):
-        self.session.evaluate(turn)
-        self.b.feedback.emit(turn)
+        session = self.session
+        session.evaluate(turn)
+        if not session.aborted:
+            self.b.feedback.emit(turn)
 
     def skip_question(self):
         if not self.session or not self.session.current or getattr(self, "_asking", False):
@@ -756,8 +773,30 @@ class MainWindow(QMainWindow):
         if self.speaker and self.speak.isChecked():
             self.speaker.say(note)
 
+    def abort_interview(self):
+        """Ended early: stop everything and throw the interview away (no scoring, saving or analysis)."""
+        if not self.session:
+            return
+        self.session.aborted = True
+        self._set_interview_enabled(False)
+        self._clock.stop()
+        self._stop_live()
+        if self.speaker:
+            self.speaker.stop()
+        if self.recorder and self.recorder.recording:
+            self.recorder.stop(); self._set_mic_ui(False); self._level_timer.stop()
+        if not self.builder.loop:
+            self.stop_camera()
+        self.session = None
+        self.iv_stack.setCurrentIndex(0)
+        self.start_btn.setEnabled(True)
+        self.fb_view.setMarkdown("_The last interview was ended early, so it was discarded: no report, history or "
+                                 "dashboard data. Only completed interviews (time up, or Arjun wraps up) are analysed._")
+        self.tabs.setCurrentWidget(self.fb_view)
+        self.statusBar().showMessage("Interview ended early and discarded.")
+
     def end_interview(self):
-        if not self.session or not self.session.turns:
+        if not self.session or not self.session.turns or self.session.aborted:
             return
         self._set_interview_enabled(False)
         self._clock.stop()
@@ -791,6 +830,8 @@ class MainWindow(QMainWindow):
         return pad if (turn.segment in CODE_SEGMENTS or pad != getattr(self, "_pad_snapshot", "")) else ""
 
     def _on_agenda(self, agenda):
+        if not self.session or self.session.aborted:
+            return
         self._draw_agenda()
         self._clock.start()
         self._tick()
@@ -1038,9 +1079,18 @@ class MainWindow(QMainWindow):
         self.mic_btn.style().unpolish(self.mic_btn); self.mic_btn.style().polish(self.mic_btn)
 
     def _confirm_end(self):
-        if not self.session or not self.session.turns:
+        if not self.session:
             return
-        if QMessageBox.question(self, "End interview", "End the interview now and get your scored report?") \
+        if not self.session.mostly_done:
+            left = max(0, int(self.session.remaining() // 60))
+            if QMessageBox.question(
+                    self, "End interview early?",
+                    f"You still have about {left} min left.\n\nInterviews ended early are discarded: no report, "
+                    "no history and nothing added to your dashboard.\n\nEnd and discard this interview?") \
+                    == QMessageBox.Yes:
+                self.abort_interview()
+            return
+        if QMessageBox.question(self, "End interview", "Finish now and get your scored report?") \
                 == QMessageBox.Yes:
             turn = self.session.current
             if turn and not turn.answer and turn.kind != "wrap":
@@ -1149,8 +1199,8 @@ class MainWindow(QMainWindow):
             self.speaker.stop()
         if self.recorder and self.recorder.recording:
             self.recorder.stop()
-        if self.session and self.session.turns and not self.session.report:
-            self.session.save()
+        if self.session and not self.session.report:
+            self.session.aborted = True  # closed mid-interview: discard, never saved or analysed
         super().closeEvent(e)
 
 

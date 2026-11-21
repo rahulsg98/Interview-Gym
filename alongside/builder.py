@@ -240,7 +240,7 @@ class RoundBuilder(QWidget):
         self.done_btn = QPushButton("I'm done → next round"); self.done_btn.clicked.connect(self.end_round)
         self.next_btn = QPushButton("Start next round", objectName="primary")
         self.next_btn.clicked.connect(self.next_round); self.next_btn.hide()
-        self.end_btn = QPushButton("End loop"); self.end_btn.clicked.connect(self.end_loop)
+        self.end_btn = QPushButton("End loop", objectName="danger"); self.end_btn.clicked.connect(self._end_clicked)
         top.addWidget(self.round_lbl); top.addSpacing(16); top.addWidget(self.state_lbl); top.addStretch()
         top.addWidget(self.timer_lbl); top.addSpacing(16)
         for btn in (self.pause_btn, self.done_btn, self.next_btn, self.end_btn):
@@ -346,6 +346,8 @@ class RoundBuilder(QWidget):
         threading.Thread(target=work, daemon=True).start()
 
     def next_round(self):
+        if not self.loop or self.loop_finished:
+            return
         self.next_btn.hide()
         self.idx += 1
         if self.idx >= len(self.loop.rounds):
@@ -359,16 +361,19 @@ class RoundBuilder(QWidget):
         self._set_state("Arjun is preparing the problem…")
         self.done_btn.setEnabled(True)
         idx = self.idx
+        lp = self.loop
 
         def work():
             try:
-                self.b.problem.emit(idx, self.loop.start_round(r))
+                problem = lp.start_round(r)
+                if not getattr(lp, "aborted", False):
+                    self.b.problem.emit(idx, problem)
             except Exception as e:  # noqa: BLE001
                 traceback.print_exc(); self.b.error.emit(str(e))
         threading.Thread(target=work, daemon=True).start()
 
     def _on_problem(self, idx: int, problem: dict):
-        if idx != self.idx:
+        if not self.loop or self.loop_finished or idx != self.idx:
             return
         r = self.loop.rounds[idx]
         self.problem_view.setMarkdown(f"## {problem.get('title', r.name)}\n\n{problem.get('statement', '')}")
@@ -409,12 +414,15 @@ class RoundBuilder(QWidget):
         self._set_state("Round finished. Scoring in the background.")
         self.evaluating += 1
 
+        lp = self.loop
+
         def work():
             try:
-                self.loop.evaluate_round(r)
-                self.loop.save_round(r)
+                lp.evaluate_round(r)  # saved only if the whole loop is completed (see end_loop)
             except Exception as e:  # noqa: BLE001
-                traceback.print_exc(); self.b.error.emit(f"Scoring {r.name} failed: {e}")
+                traceback.print_exc()
+                if not getattr(lp, "aborted", False):
+                    self.b.error.emit(f"Scoring {r.name} failed: {e}")
             finally:
                 self.evaluating -= 1
         threading.Thread(target=work, daemon=True).start()
@@ -428,14 +436,57 @@ class RoundBuilder(QWidget):
         # Only used to start round 1 after models load.
         self.next_round()
 
+    def _loop_complete(self) -> bool:
+        """All selected rounds done (the last one may be ended once 90% of its time is used)."""
+        lp = self.loop
+        if not lp or self.idx != len(lp.rounds) - 1:
+            return False
+        r = lp.rounds[self.idx]
+        if r.ended:
+            return True
+        return bool(r.started) and (time.time() - r.started) >= r.duration_min * 60 * 0.9
+
+    def _end_clicked(self):
+        if not self.loop or self.loop_finished:
+            return
+        if self._loop_complete():
+            self.end_loop()
+            return
+        if QMessageBox.question(
+                self, "End loop early?",
+                "Not all rounds are finished.\n\nLoops ended early are discarded: no debrief, no history and "
+                "nothing added to your dashboard.\n\nEnd and discard this loop?") == QMessageBox.Yes:
+            self.abort_loop()
+
+    def abort_loop(self):
+        """Ended early: stop and throw the loop away (no scoring, saving or analysis)."""
+        lp = self.loop
+        if not lp:
+            return
+        lp.aborted = True
+        self.loop_finished = True
+        self.clock.stop()
+        self.react_gen += 1
+        self._stop_listener()
+        if self.host.speaker:
+            self.host.speaker.stop()
+        if not self.host.session:
+            self.host.stop_camera()
+        self.loop = None
+        self.next_btn.hide()
+        self.stack.setCurrentIndex(0)
+        self.research_log.appendPlainText("Loop ended early and discarded (only completed loops are analysed).")
+        self.b.status.emit("Loop ended early and discarded.")
+
     def end_loop(self):
         if not self.loop or self.loop_finished:
             return
+        if not self._loop_complete():
+            self.abort_loop()
+            return
         self.loop_finished = True
-        if 0 <= self.idx < len(self.loop.rounds) and not self.loop.rounds[self.idx].ended:
+        if not self.loop.rounds[self.idx].ended:
             self.end_round()
-            if self.idx < len(self.loop.rounds) - 1:  # ended early: skip remaining rounds
-                self.next_btn.hide()
         self.clock.stop()
         self._stop_listener()
         if not self.host.session:
@@ -454,8 +505,8 @@ class RoundBuilder(QWidget):
                 self.loop.final_report(on_text=chunk)
                 self.loop.save_report()
                 done = [r for r in self.loop.rounds if r.result]
-                if done:
-                    self.loop.save_round(done[-1])
+                for r in done:  # completed loop: now (and only now) record every round
+                    self.loop.save_round(r)
                 head = "\n".join(f"- **{r.name}**: {r.result.get('score')}/10 · {r.result.get('decision', '')}"
                                  for r in done)
                 self.b.report.emit(f"### Round scores\n{head}\n\n---\n\n{self.loop.report}")
@@ -574,10 +625,11 @@ class RoundBuilder(QWidget):
         self.last_reaction = time.time()
         self._set_state("Arjun is thinking…")
         remaining = self.remaining
+        lp = self.loop
 
         def work():
             try:
-                data = self.loop.react(r, event, remaining, images)
+                data = lp.react(r, event, remaining, images)
             except Exception as e:  # noqa: BLE001
                 traceback.print_exc()
                 data = {"action": "listen", "_error": str(e)}

@@ -27,6 +27,16 @@ He also judges your **communication and confidence**, from your voice and your w
   A countdown and the agenda are shown above the chat. Questions follow the current segment, and the interview ends when time is up.
 - **Code / design pad:** coding and design questions switch to a pad that Arjun reads, alongside your spoken answer. To draw diagrams, use a whiteboard app and press **Review my screen**.
 
+## Only completed interviews count
+An interview is **completed** when:
+- the timer runs out,
+- Arjun wraps up, or
+- you press End after at least 90% of the time has passed.
+
+A Round Builder loop is completed when every selected round has finished.
+
+Anything ended earlier is **discarded**: no report, no history entry and nothing added to the Dashboard. You'll be asked to confirm before it's thrown away. Closing the app mid-interview also discards it.
+
 ## Three tabs
 
 | Tab | What it does |

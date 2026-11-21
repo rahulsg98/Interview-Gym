@@ -137,6 +137,13 @@ class Session:
     model: str = "sonnet"
     agenda: list[dict] = field(default_factory=list)  # [{kind, title, minutes, focus}]
     clock_start: float = 0.0
+    aborted: bool = False   # ended early by the candidate: never scored, saved or analysed
+
+    COMPLETE_FRACTION = 0.9  # ending after 90% of the time still counts as a completed interview
+
+    @property
+    def mostly_done(self) -> bool:
+        return bool(self.clock_start) and self.elapsed() >= self.duration_sec * self.COMPLETE_FRACTION
 
     # ---------- time & agenda ----------
     @property
@@ -333,10 +340,7 @@ that level and tier'; 9-10 is exceptional; 4-5 is a likely reject). Evaluate the
         fb = llm.ask_json(prompt, COACH_SYSTEM, self.model, images)
         fb["delivery_flags"] = delivery_flags(turn.metrics) + camera_flags(turn.camera)
         turn.feedback = fb
-        try:
-            self.save()  # keep the progress dashboard current even if the app is closed mid-interview
-        except Exception:  # noqa: BLE001
-            pass
+        # Not persisted here: only completed interviews are saved/analysed (see Session.save at the end).
         return fb
 
     def react(self, turn: Turn, event: str) -> dict:
