@@ -293,6 +293,7 @@ def delete_record(r: dict) -> None:
 
 class PastInterviews(QWidget):
     changed = Signal()   # emitted after a delete, so the dashboard can refresh
+    focus_requested = Signal()   # ⛶ Full screen pressed
     _learn_progress = Signal(str, int, int, str)   # record id, done, total, error
 
     model_getter = staticmethod(lambda: "sonnet")
@@ -335,7 +336,11 @@ class PastInterviews(QWidget):
         self.open_btn.clicked.connect(self._open_file)
         self.del_btn = QPushButton("Delete", objectName="danger")
         self.del_btn.clicked.connect(self._delete)
-        hrow.addWidget(self.title, 1); hrow.addWidget(self.open_btn); hrow.addWidget(self.del_btn)
+        self.full_btn = QPushButton("⛶ Full screen")
+        self.full_btn.setToolTip("Read this interview on the whole screen (Esc or F11 to exit)")
+        self.full_btn.clicked.connect(self.focus_requested.emit)
+        hrow.addWidget(self.title, 1); hrow.addWidget(self.full_btn); hrow.addWidget(self.open_btn)
+        hrow.addWidget(self.del_btn)
         rv.addLayout(hrow)
         self.overview = QLabel("")
         self.overview.setTextFormat(Qt.RichText)
@@ -366,6 +371,7 @@ class PastInterviews(QWidget):
 
         split.addWidget(left); split.addWidget(right)
         split.setSizes([430, 900])
+        self.left_panel = left
         self._set_buttons(False)
         self.refresh()
 

@@ -20,17 +20,17 @@ for _d in (MODELS_DIR, SESSIONS_DIR, TMP_DIR):
 @dataclass
 class Settings:
     claude_model: str = "sonnet"          # sonnet | opus | haiku
-    whisper_model: str = "small.en"       # tiny.en | base.en | small.en
-    voice: str = "en_US-l2arctic-medium"
-    voice_speaker: int | None = 10        # 10 = ASI (Indian English, male)
-    speech_rate: float = 1.0              # >1 slower, <1 faster (piper length_scale)
+    whisper_model: str = "parakeet"       # speech-to-text: parakeet (best) | small.en | base.en | tiny.en
+    voice: str = "kokoro:hm_psi"          # natural Indian male (Kokoro); classic Piper voices are also available
+    voice_speaker: int | None = None
+    speech_rate: float = 1.25             # voice speed setting (Kokoro 1.25 ≈ 15% faster than its default pace)
     speak_questions: bool = True
     use_camera: bool = True
     hands_free: bool = True
     headphones: bool = False
     code_language: str = "Java"
     mic: str = ""                         # PipeWire mic node; "" = Auto (default mic, skipping silent ones)
-    answer_pause: float = 5.0             # seconds of silence before Arjun treats your turn as finished           # default language for coding questions in the workspace
+    answer_pause: float = 1.5             # seconds of silence before Arjun treats your turn as finished           # default language for coding questions in the workspace
     profiles: dict = field(default_factory=dict)  # name -> {role, resume, jd, focus}
 
     @classmethod

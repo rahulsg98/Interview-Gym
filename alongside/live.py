@@ -7,11 +7,12 @@ The interviewer:
 - shows what it says at the moment the voice starts, not before;
 - if you keep talking while it is thinking, throws that reply away and reacts to everything you said;
 - stays quiet while you code, peeks at the pad when you pause typing, checks in after long silences;
-- says short acknowledgements ("Mm-hmm.", "Go on.") so you know it's listening;
+- says short acknowledgements ("Okay.", "Go on.", "I see.") so you know it's listening;
 - moves on when you say you're done ("that's my answer", "I'm done", "next question") or it judges the answer complete.
 """
 from __future__ import annotations
 
+import logging
 import random
 import re
 import threading
@@ -22,7 +23,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 
 DONE_RE = re.compile(r"\b((i'?m|i am) done with (my|the|this) (answer|solution|code)|i'?m done|i am done|that'?s (it|all|my answer)|that is (it|all|my answer)|done with (my|the|this) "
                      r"(answer|solution|code)|next question|move on|let'?s move on|i'?m finished|finished)\b", re.I)
-BACKCHANNELS = ["Mm-hmm.", "Okay.", "Go on.", "Right.", "Hmm, okay."]
+BACKCHANNELS = ["Okay.", "Right.", "I see.", "Got it.", "Go on.", "Okay, go on.", "Sure."]
 
 
 class LiveConversation(QObject):
@@ -34,11 +35,13 @@ class LiveConversation(QObject):
     _reaction = Signal(int, object)
     _utt = Signal(str, object)
     _main = Signal(object)              # run a callable on the GUI thread
+    _turn_end = Signal()                # you just finished speaking (text still being transcribed)
 
     CODE_IDLE_SEC = 25      # typing paused this long -> may look at the pad
     MIN_GAP_SEC = 25        # min gap between unsolicited reactions
-    SILENCE_THEORY = 30     # silent this long on a theory question -> check in
-    SILENCE_CODE = 100      # silent and not typing this long while coding -> check in
+    SILENCE_THEORY = 5      # no speech at all (noise doesn't count) this long -> "take your time"
+    SILENCE_CODE = 25       # no speech and no typing this long while coding -> check in
+    NUDGE_BACKOFF = (1, 3, 6)  # 2nd nudge waits 3x as long, later ones 6x (5 s, 15 s, 30 s for theory)
 
     def __init__(self, host, react_fn, get_code, is_code_question, patience: float = 2.0, headphones: bool = False):
         """react_fn(event:str) -> dict runs on a worker thread and returns
@@ -58,12 +61,15 @@ class LiveConversation(QObject):
         self.gen = 0
         self.pending: str | None = None
         self.next_after_speech = False
-        self.last_reaction = self.last_activity = self.last_edit = self.last_backchannel = time.time()
+        self.last_reaction = self.last_activity = self.last_edit = time.time()
+        self.last_backchannel = 0.0
+        self.nudges = 0          # silence nudges since you last spoke
         self.question_spoken_at = time.time()
         self.code_seen = ""
         self._reaction.connect(self._on_reaction)
         self._utt.connect(self._on_utterance)
         self._main.connect(lambda fn: fn())
+        self._turn_end.connect(self._on_turn_end)
         self._last_state = ""
         self.tick = QTimer(self, interval=1000, timeout=self._tick)
         self.tts_watch = QTimer(self, interval=150, timeout=self._watch_tts)
@@ -80,7 +86,7 @@ class LiveConversation(QObject):
                 traceback.print_exc()
 
         self.listener = LiveMic(self.host.transcriber, on_text, on_partial=self.partial.emit,
-                                silence_sec=self.patience)
+                                silence_sec=self.patience, on_turn_end=self._turn_end.emit)
         self.listener.start()
         self.active = True
         self.tick.start()
@@ -148,7 +154,7 @@ class LiveConversation(QObject):
             if self.next_after_speech:
                 self._fire_next("interviewer")
 
-    def new_question(self, text: str, on_start=None):
+    def new_question(self, text: str, on_start=None, kind: str = "question", first: bool = False):
         """Called for a new question: speak it, reset the turn state. on_start() runs (GUI thread) when the voice
         starts, or right away if voice is off, so the question appears in writing as Arjun starts asking it."""
         self.holding = False
@@ -158,17 +164,22 @@ class LiveConversation(QObject):
         self.next_after_speech = False
         now = time.time()
         self.last_reaction = self.last_activity = self.question_spoken_at = now
+        self.nudges = 0
         self.code_seen = self.get_code()
         sp = self.host.speaker
         if sp:
             sp.stop()
-        if not self._speak(text, on_start) and on_start:
+        spoken = text
+        if sp and getattr(sp, "natural", False) and not first and kind in sp.LEAD_INS:
+            # Natural voice needs ~2 s to generate a long question: open with an instant, natural lead-in.
+            spoken = random.choice(sp.LEAD_INS[kind]) + " " + text
+        if not self._speak(spoken, on_start) and on_start:
             on_start()
 
     def _watch_tts(self):
         sp = self.host.speaker
-        if self.headphones and self.listener and self.listener.in_speech and sp and sp.busy:
-            sp.stop()  # barge-in: you started talking over the interviewer
+        # Arjun always finishes what he's saying (no barge-in): with headphones the mic keeps listening, so
+        # anything you say meanwhile is still heard and answered afterwards.
         if sp and sp.busy:
             return
         self.tts_watch.stop()
@@ -184,17 +195,36 @@ class LiveConversation(QObject):
 
     # ------------------------------------------------------------------ hearing
     def _on_utterance(self, text: str, stats):
+        logging.info("live: heard %d words: %s", len(text.split()), text[:120])
         if not self.active or self.holding:
+            logging.info("live: ignored (active=%s holding=%s)", self.active, self.holding)
             return
         self.last_activity = time.time()
+        self.nudges = 0
         self.user_text.emit(text, stats)
         if DONE_RE.search(text) and len(text.split()) <= 14:
             self._fire_next("candidate")
             return
         self._request("utterance")
 
+    def _on_turn_end(self):
+        if self.active and not self.holding and not self.paused:
+            self._set_state("transcribing")
+            self._quick_ack()
+
+    def _quick_ack(self):
+        """A short "Okay." / "I see." right after you pause, so you know Arjun is with you while he thinks.
+        Only with headphones (on speakers it would mute the mic and could clip your next words)."""
+        now = time.time()
+        sp = self.host.speaker
+        if (self.headphones and sp and self.host.speak.isChecked() and not sp.busy and not self.is_code_question()
+                and now - self.last_backchannel > 6 and random.random() < 0.8):
+            self.last_backchannel = now
+            sp.say(random.choice(BACKCHANNELS))
+
     def note_edit(self):
         self.last_edit = self.last_activity = time.time()
+        self.nudges = 0
 
     def typed_message(self):
         self.last_activity = time.time()
@@ -255,6 +285,13 @@ class LiveConversation(QObject):
             return
         action = data.get("action", "listen")
         say = (data.get("say") or "").strip()
+        ev = data.get("_event")
+        logging.info("live: %s -> %s %s %s", ev, action, data.get("kind", ""), say[:80])
+        if ev == "utterance" and action == "speak" and (data.get("kind") == "nudge" or re.search(
+                r"take your time|no rush|talk me through what you'?re thinking", say, re.I)):
+            action, say = "listen", ""  # you just spoke: never answer that with "take your time"
+        if ev == "silence" and action == "speak":
+            self.nudges += 1
         if action == "next":
             if say:
                 self.next_after_speech = True
@@ -267,7 +304,7 @@ class LiveConversation(QObject):
             return
         # listen: sometimes acknowledge so the candidate knows we're here
         now = time.time()
-        if (data.get("_event") == "utterance" and now - self.last_backchannel > 20 and random.random() < 0.45
+        if (data.get("_event") == "utterance" and now - self.last_backchannel > 8 and random.random() < 0.6
                 and not self.is_code_question()):
             self.last_backchannel = now
             self.say(random.choice(BACKCHANNELS), "ack")
@@ -300,6 +337,10 @@ class LiveConversation(QObject):
         if (code != self.code_seen and now - self.last_edit >= self.CODE_IDLE_SEC
                 and now - self.last_reaction >= self.MIN_GAP_SEC):
             self._request("code")
-        elif since_q > 8 and now - self.last_activity >= (self.SILENCE_CODE if coding else self.SILENCE_THEORY) \
-                and now - self.last_reaction >= (self.SILENCE_CODE if coding else self.SILENCE_THEORY):
-            self._request("silence")
+        else:
+            base = self.SILENCE_CODE if coding else self.SILENCE_THEORY
+            wait = base * self.NUDGE_BACKOFF[min(self.nudges, len(self.NUDGE_BACKOFF) - 1)]
+            if (since_q >= base and now - self.last_activity >= wait and now - self.last_reaction >= wait
+                    and not self.reacting):
+                logging.info("live: %.0fs of silence -> check in (nudge #%d)", now - self.last_activity, self.nudges + 1)
+                self._request("silence")

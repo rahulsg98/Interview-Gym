@@ -7,3 +7,7 @@ opencv-python-headless>=4.10
 markdown-it-py
 mdit-py-plugins
 pygments
+onnxruntime
+espeakng-loader
+phonemizer
+onnx-asr[hub]

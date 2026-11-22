@@ -30,18 +30,42 @@ except Exception:  # noqa: BLE001
     HAVE_WEB = False
 
 
-def ensure_mermaid() -> None:
-    """Download Mermaid once (background-safe)."""
-    if MERMAID_JS.exists() and MERMAID_JS.stat().st_size > 100_000:
-        return
+_MERMAID_LOCK = threading.Lock()
+_MERMAID_STARTED = False
+
+
+def _mermaid_ok() -> bool:
     try:
-        import urllib.request
-        WEB_DIR.mkdir(parents=True, exist_ok=True)
-        tmp = MERMAID_JS.with_suffix(".part")
-        urllib.request.urlretrieve(MERMAID_URL, tmp)
-        tmp.rename(MERMAID_JS)
-    except Exception:  # noqa: BLE001
-        pass
+        return MERMAID_JS.stat().st_size > 1_000_000 and MERMAID_JS.read_bytes()[-400:].rstrip().endswith((b")", b";", b"}"))
+    except OSError:
+        return False
+
+
+def ensure_mermaid() -> None:
+    """Download Mermaid once (all views share it; safe to call from many threads)."""
+    with _MERMAID_LOCK:
+        if _mermaid_ok():
+            return
+        try:
+            import urllib.request
+            WEB_DIR.mkdir(parents=True, exist_ok=True)
+            tmp = MERMAID_JS.with_suffix(f".{threading.get_ident()}.part")
+            urllib.request.urlretrieve(MERMAID_URL, tmp)
+            if tmp.stat().st_size > 1_000_000:
+                tmp.replace(MERMAID_JS)
+            else:
+                tmp.unlink(missing_ok=True)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _start_mermaid_download() -> None:
+    global _MERMAID_STARTED
+    if _MERMAID_STARTED or _mermaid_ok():
+        return
+    _MERMAID_STARTED = True
+    MERMAID_JS.unlink(missing_ok=True)  # drop a broken copy
+    threading.Thread(target=ensure_mermaid, daemon=True).start()
 
 
 # ------------------------------------------------------------------ markdown → html
@@ -288,7 +312,7 @@ def _pygments_css() -> str:
 
 
 def template() -> str:
-    mermaid = '<script src="mermaid.min.js"></script>' if MERMAID_JS.exists() else ""
+    mermaid = '<script src="mermaid.min.js"></script>' if _mermaid_ok() else ""
     return f"""<!doctype html><html><head><meta charset="utf-8">
 <style>{CSS}{_pygments_css()} pre.hl {{ background:#0b0d14 !important; }}</style>{mermaid}
 <script>
@@ -338,8 +362,7 @@ if HAVE_WEB:
             self.loadFinished.connect(self._on_loaded)
             WEB_DIR.mkdir(parents=True, exist_ok=True)
             super().setHtml(template(), QUrl.fromLocalFile(str(WEB_DIR) + "/"))
-            if not MERMAID_JS.exists():
-                threading.Thread(target=ensure_mermaid, daemon=True).start()
+            _start_mermaid_download()
 
         def _on_loaded(self, ok: bool):
             self._ready = True

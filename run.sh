@@ -7,6 +7,10 @@ if [[ ! -d .venv ]]; then
   .venv/bin/pip install -q --upgrade pip
   .venv/bin/pip install -q -r requirements.txt
 fi
+# Natural voice engine: kokoro-onnx caps Python <3.14 in its metadata but runs fine on newer Python.
+if ! .venv/bin/python -c "import kokoro_onnx" 2>/dev/null; then
+  .venv/bin/pip install -q --ignore-requires-python --no-deps "kokoro-onnx==0.6.1" || true
+fi
 # Hide noisy but harmless Qt/Wayland warnings (text-input focus chatter, portal app-ID registration).
 export QT_LOGGING_RULES="${QT_LOGGING_RULES:-qt.qpa.wayland.textinput=false;qt.qpa.services=false}"
 set +e

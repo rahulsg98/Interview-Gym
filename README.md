@@ -67,6 +67,10 @@ Feedback, Report, History and Learnings are shown as designed pages, not plain t
 
 Mermaid is downloaded once (3 MB). Links open in your normal browser.
 
+## Layout
+- **Resizable setup column:** drag the divider and the form reflows. Button rows stack, dropdowns shrink and labels move above their fields. Below its minimum width the column folds away; **▸ Show setup** brings it back. **◂ Hide setup** folds it in one click.
+- **⛶ Full screen** on Past Interviews and on the Interview side panel shows that reading block on the whole screen. **F11** toggles full screen, and **Esc** exits.
+
 ## Camera and clearing
 - The camera only runs **during** an interview or Round Builder loop. It switches off and releases the webcam the moment the interview ends.
 - Turn it off or on at any time with **📷 Camera** on the live screen. The setup checkbox only sets the default.
@@ -77,7 +81,10 @@ Mermaid is downloaded once (3 MB). Links open in your normal browser.
 ## Microphone
 - **Microphone** in the Interview setup: **Auto** uses your default mic, but skips any mic that sends silence. For example, Bluetooth earbuds in music mode have no working mic, so Auto falls back to the laptop mic. You can also pick a mic yourself, and **Test** checks that it actually hears you.
 - If the mic goes silent during an interview, a red warning says Arjun can't hear you.
-- **Wait after I stop** (5 s by default): how long you stay quiet before Arjun treats your answer as finished, then thinks and replies. Short pauses while you think don't end your turn.
+- **Wait after I stop** (1.5 s by default): how long you stay quiet before Arjun treats your answer as finished, then thinks and replies. A short thinking pause mid-answer doesn't make him interrupt: he only responds when your answer sounds finished.
+- **"Take your time"** only comes after about 5 s with no speech at all, and later nudges wait longer (about 15 s, then 30 s). Background noise doesn't count as speech.
+- **Background noise is ignored.** A neural voice detector (Silero, bundled with faster-whisper) only counts real human speech, so fans, typing and traffic don't keep your turn open.
+- **Arjun always finishes his sentence**, even if you start talking. With **headphones/earbuds** ticked, the mic stays on while he talks, so you're still heard, and he says a quick "Okay." or "I see." the moment you pause.
 
 ## Soft skills
 - **Voice:** words per minute, filler words ("um", "basically", "you know"), hedging ("I think", "maybe") and long pauses. All of it is measured locally.
@@ -91,9 +98,9 @@ For the camera to work well, sit **facing** a light source, not with a window or
 | Part | Tool | Cost |
 |---|---|---|
 | Questions, scoring, research, screen and camera review | Claude, through the Claude Code CLI (`claude -p`) with your subscription login. Web search is used for company research. | No API key |
-| Speech to text | faster-whisper (`small.en`, int8 on the CPU) | Free, offline |
-| Voice | Piper TTS, `en_US-l2arctic` speaker ASI (Indian English male) | Free, offline |
-| Hands-free listening | Voice-activity detection on `arecord`. Your speech is transcribed in pieces *while* you talk, so your words are ready about 1 s after the pause (5 s by default). Arjun never treats "still transcribing" as silence, and his text appears the moment his voice starts. | Local |
+| Speech to text | **NVIDIA Parakeet TDT 0.6B v2** (ONNX, int8, CC-BY-4.0). In tests on accented, noisy technical answers it was the most accurate (9.2% word errors vs 9.8% for Whisper small.en) and ~8× faster. Whisper models remain selectable. | Free, offline |
+| Voice | **Natural:** Kokoro-82M (Apache-2.0) on the CPU, default an Indian male voice (`hm_psi`), plus US, British and blended male voices. **Classic:** Piper voices (faster, but robotic). Pick one under **Voice** and press **▶ Preview**. A headset-style EQ trims the bass for clarity, and **Voice speed** (Slow to Fast, default Normal) sets the pace. | Free, offline |
+| Hands-free listening | Silero neural voice detection plus the room's noise level on `arecord`, so background noise is ignored and quiet speech in a noisy room is still caught (1 s of audio before detection is kept, so first words aren't lost). Your speech is transcribed in pieces *while* you talk, so your words are ready about 1 s after the 1.5 s pause. Arjun never treats "still transcribing" as silence, and his text appears the moment his voice starts. | Local |
 | Camera | OpenCV and the YuNet face detector | Local |
 | Screen capture | xdg-desktop-portal Screenshot | Built in |
 | Data | SQLite at `~/.local/share/alongside/progress.db`, sessions in `~/.local/share/alongside/sessions` | Local |
@@ -108,7 +115,7 @@ claude                 # log in: type /login, choose "Claude account with subscr
 ./install-desktop.sh   # adds Interview Gym (with its icon) to the Applications menu
 ```
 
-On the first run, the app downloads the Whisper model (~250 MB), the voice (~75 MB) and the face model (0.2 MB).
+On the first run, the app downloads the speech-to-text model (~650 MB), the natural voice model (~120 MB) and the face model (0.2 MB).
 
 The first time you use screen review, GNOME asks for screenshot permission. Choose **Allow**.
 

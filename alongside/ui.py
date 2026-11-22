@@ -29,6 +29,7 @@ from . import soft
 from PySide6.QtGui import QImage, QPixmap
 from .tts import VOICES, voice_key
 from .richview import RichView
+from .responsive import make_responsive, reflow
 
 STYLE = """
 /* ---- Interview Gym theme: deep slate, violet → cyan accent, soft cards ---- */
@@ -153,6 +154,7 @@ class Bridge(QObject):
     resume_done = Signal(object)
     screen_note = Signal(str)
     restore_mic_test = Signal()
+    restore_voice_preview = Signal()
 
 
 def run_bg(bridge: Bridge, fn, *args, busy: bool = True):
@@ -208,6 +210,9 @@ class MainWindow(QMainWindow):
         self.interviews.setObjectName("root")
         self.main_tabs.addTab(self.interviews, "🗂  Past Interviews")
         self.interviews.changed.connect(lambda: self.dashboard.refresh())
+        iv = self.interviews
+        iv.focus_requested.connect(lambda: self.toggle_focus(
+            iv.full_btn, [iv.left_panel, iv.title, iv.overview, iv.open_btn, iv.del_btn]))
         self.interviews.model_getter = lambda: self.model.currentText()
         from .builder import RoundBuilder
         self.builder = RoundBuilder(self)
@@ -222,8 +227,10 @@ class MainWindow(QMainWindow):
         setup_scroll = QScrollArea(widgetResizable=True)
         setup_scroll.setFrameShape(QFrame.NoFrame)
         setup_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        setup_scroll.setWidget(self._build_setup())
-        setup_scroll.setMinimumWidth(320)
+        setup_w = self._build_setup()
+        make_responsive(setup_w)
+        setup_scroll.setWidget(setup_w)
+        setup_scroll.setMinimumWidth(295)  # narrower than this, the setup column folds away (▸ Setup brings it back)
         left = QWidget()
         lv = QVBoxLayout(left); lv.setContentsMargins(0, 0, 0, 0)
         lv.addWidget(setup_scroll, 1)
@@ -231,6 +238,11 @@ class MainWindow(QMainWindow):
         split.addWidget(left)
         split.addWidget(self._build_side())
         split.setSizes([460, 900])
+        split.setChildrenCollapsible(False)
+        split.setCollapsible(0, True)   # past its minimum width the setup column hides instead of clipping
+        split.setCollapsible(1, False)
+        self.setup_split = split
+        split.splitterMoved.connect(lambda *_: self._sync_setup_toggle())
         self.iv_stack.addWidget(self._build_interview())  # page 1: live interview
 
         self.level_bar = QProgressBar(maximum=100, textVisible=False)
@@ -262,9 +274,12 @@ class MainWindow(QMainWindow):
         b.resume_done.connect(self._on_resume_done)
         b.screen_note.connect(self._on_screen_note)
         b.restore_mic_test.connect(lambda: self.mic_test.setEnabled(True))
+        b.restore_voice_preview.connect(lambda: self.voice_preview.setEnabled(True))
         self._clock = QTimer(self, interval=1000, timeout=self._tick)
 
         QShortcut(QKeySequence("Ctrl+Space"), self, activated=self.toggle_mic)
+        QShortcut(QKeySequence("Esc"), self, activated=self.exit_focus)
+        QShortcut(QKeySequence("F11"), self, activated=self._focus_current)
         QShortcut(QKeySequence("Ctrl+Return"), self, activated=self.submit_answer)
         QShortcut(QKeySequence("Ctrl+H"), self, activated=self.ask_hint)
         QShortcut(QKeySequence("Ctrl+Shift+S"), self, activated=lambda: self.review_screen(False))
@@ -298,7 +313,7 @@ class MainWindow(QMainWindow):
         clear.setToolTip("Clear the setup form, and optionally delete saved resume data")
         clear.clicked.connect(self.clear_setup)
         prow.addWidget(clear)
-        v.addLayout(prow)
+        v.addWidget(reflow(prow))
 
         f = QFormLayout()
         self.role = QComboBox(); self.role.addItems(ROLES); self.role.setEditable(True)
@@ -337,7 +352,7 @@ class MainWindow(QMainWindow):
         self.resume_view_btn.setToolTip("Show the claims Arjun will verify")
         self.resume_view_btn.clicked.connect(self._show_resume_analysis)
         rrow.addWidget(self.resume_status, 1); rrow.addWidget(upload); rrow.addWidget(self.resume_view_btn)
-        v.addLayout(rrow)
+        v.addWidget(reflow(rrow))
         self.resume = QPlainTextEdit(placeholderText="Upload your resume (.pdf / .docx / .txt / .md) or paste it. "
                                                      "Arjun will always grill your experience section.")
         self.resume.textChanged.connect(self._refresh_resume_status)
@@ -348,7 +363,7 @@ class MainWindow(QMainWindow):
         loadj = QPushButton("Load file…")
         loadj.clicked.connect(lambda: self._load_file(self.jd))
         jrow.addStretch(); jrow.addWidget(loadj)
-        v.addLayout(jrow)
+        v.addWidget(reflow(jrow))
         self.jd = QPlainTextEdit(placeholderText="Paste the JD to get company-specific questions")
         v.addWidget(self.jd, 1)
 
@@ -360,16 +375,32 @@ class MainWindow(QMainWindow):
             self.voice.addItem(label, key)
         idx = self.voice.findData(voice_key(self.settings.voice, self.settings.voice_speaker))
         self.voice.setCurrentIndex(max(idx, 0))
-        self.whisper = QComboBox(); self.whisper.addItems(["base.en", "small.en", "tiny.en"])
+        self.whisper = QComboBox(); self.whisper.addItems(["parakeet", "small.en", "base.en", "tiny.en"])
+        self.whisper.setToolTip("Speech to text. parakeet: most accurate and ~8x faster on this laptop (recommended). "
+                                "small.en / base.en / tiny.en: Whisper models (slower or less accurate).")
         self.whisper.setCurrentText(self.settings.whisper_model)
         self.speak = QCheckBox("Speak questions aloud", checked=self.settings.speak_questions)
         self.live_fb = QCheckBox("Show feedback after each answer", checked=True)
-        self.use_cam = QCheckBox("Camera on: judge confidence && presence", checked=self.settings.use_camera)
+        self.use_cam = QCheckBox("Camera (confidence && presence)", checked=self.settings.use_camera)
         self.use_cam.setToolTip("Webcam is analysed locally (eye contact, posture, fidgeting). Occasional snapshots "
                                 "go to Claude for feedback on expression and posture.")
         self.use_cam.toggled.connect(self._camera_toggled)
         f2.addRow("Claude model", self.model)
-        f2.addRow("Voice", self.voice)
+        voice_row = QHBoxLayout()
+        self.voice_preview = QPushButton("▶ Preview")
+        self.voice_preview.setToolTip("Hear this voice. 'Natural' voices sound like a real person; "
+                                      "'Classic' ones are faster but robotic.")
+        self.voice_preview.clicked.connect(self._preview_voice)
+        voice_row.addWidget(self.voice, 1); voice_row.addWidget(self.voice_preview)
+        f2.addRow("Voice", reflow(voice_row))
+        self.voice_speed = QComboBox()
+        for x in (1.0, 1.1, 1.25, 1.4, 1.55):
+            self.voice_speed.addItem({1.0: "Slow", 1.1: "Relaxed", 1.25: "Normal", 1.4: "Brisk", 1.55: "Fast"}[x], x)
+        self.voice_speed.setCurrentIndex(max(0, self.voice_speed.findData(self.settings.speech_rate)))
+        self.voice_speed.setToolTip("How fast Arjun talks. Press ▶ Preview to hear it.")
+        self.voice_speed.currentIndexChanged.connect(
+            lambda _: setattr(self.settings, "speech_rate", self.voice_speed.currentData()))
+        f2.addRow("Voice speed", self.voice_speed)
         f2.addRow("Speech model", self.whisper)
         mic_row = QHBoxLayout()
         self.mic_box = QComboBox()
@@ -379,9 +410,9 @@ class MainWindow(QMainWindow):
         self.mic_test.setToolTip("Check that this microphone actually hears you")
         self.mic_test.clicked.connect(self._test_mic)
         mic_row.addWidget(self.mic_box, 1); mic_row.addWidget(self.mic_test)
-        f2.addRow("Microphone", mic_row)
+        f2.addRow("Microphone", reflow(mic_row))
         self._fill_mics()
-        self.pause_box = QDoubleSpinBox(minimum=1.5, maximum=10.0, singleStep=0.5, suffix=" s",
+        self.pause_box = QDoubleSpinBox(minimum=1.0, maximum=6.0, singleStep=0.5, suffix=" s",
                                         value=self.settings.answer_pause)
         self.pause_box.setToolTip("How long you must stay quiet before Arjun treats your answer as finished, "
                                   "then thinks and replies. Short pauses while you think don't end your turn.")
@@ -390,10 +421,12 @@ class MainWindow(QMainWindow):
         v.addWidget(self.speak)
         v.addWidget(self.live_fb)
         v.addWidget(self.use_cam)
-        self.hands_free = QCheckBox("Hands-free: talk with Arjun like a real call", checked=self.settings.hands_free)
+        self.hands_free = QCheckBox("Hands-free conversation", checked=self.settings.hands_free)
         self.hands_free.setToolTip("Arjun speaks, listens continuously, waits until you finish, reacts, nudges and "
                                    "gives occasional hints. Say \"I'm done\" (or press Ctrl+Enter) to finish an answer.")
-        self.headphones = QCheckBox("I'm wearing headphones (lets me interrupt Arjun)", checked=self.settings.headphones)
+        self.headphones = QCheckBox("Headphones / earbuds", checked=self.settings.headphones)
+        self.headphones.setToolTip("Tick when you wear headphones or earbuds: the mic stays on while Arjun talks, "
+                                   "and he acknowledges you the moment you pause")
         v.addWidget(self.hands_free)
         v.addWidget(self.headphones)
 
@@ -614,12 +647,78 @@ class MainWindow(QMainWindow):
         self.cam_stats = QLabel("")
         self.cam_stats.setStyleSheet("color:#8b93ab; font-size:11px")
         ch = QHBoxLayout(); ch.addWidget(self.cam_view); ch.addWidget(self.cam_stats, 1)
+        tools = QVBoxLayout()
+        self.setup_toggle = QPushButton("◂ Hide setup")
+        self.setup_toggle.setToolTip("Fold the setup column away to give this panel more room (or drag the divider)")
+        self.setup_toggle.clicked.connect(self._toggle_setup)
+        self.side_full_btn = QPushButton("⛶ Full screen")
+        self.side_full_btn.setToolTip("Show this panel on the whole screen (Esc to exit)")
+        self.side_full_btn.clicked.connect(lambda: self.toggle_focus(
+            self.side_full_btn, [self.setup_split.widget(0), self.cam_view, self.cam_stats, self.setup_toggle]))
+        tools.addWidget(self.setup_toggle); tools.addWidget(self.side_full_btn); tools.addStretch()
+        ch.addLayout(tools)
         sv.addLayout(ch)
         sv.addWidget(self.tabs, 1)
         self.tabs.addTab(self.fb_view, "Preparation")
         return side
 
     # ------------------------------------------------------------------ profiles
+    def _focus_current(self):
+        """F11: full screen for the reading panel of the current tab."""
+        if getattr(self, "_focus", None):
+            self.exit_focus()
+        elif self.main_tabs.currentWidget() is self.interviews:
+            self.interviews.full_btn.click()
+        elif self.main_tabs.currentIndex() == 0 and self.iv_stack.currentIndex() == 0:
+            self.side_full_btn.click()
+
+    def _toggle_setup(self):
+        sp = self.setup_split
+        sizes = sp.sizes(); total = sum(sizes)
+        if sizes[0] > 0:
+            self._setup_width = sizes[0]
+            sp.setSizes([0, total])
+        else:
+            w = max(360, getattr(self, "_setup_width", 460))
+            sp.setSizes([w, max(300, total - w)])
+        self._sync_setup_toggle()
+
+    def _sync_setup_toggle(self):
+        shown = self.setup_split.sizes()[0] > 0
+        self.setup_toggle.setText("◂ Hide setup" if shown else "▸ Show setup")
+
+    # ------------------------------------------------------------------ full screen focus
+    def toggle_focus(self, btn, hide: list):
+        """Show one panel on the whole screen: hide the given widgets, the navigation and the status bar."""
+        if getattr(self, "_focus", None):
+            self.exit_focus()
+            return
+        hidden = [w for w in hide if w is not None and w.isVisible()]
+        for w in hidden:
+            w.hide()
+        self.main_tabs.tabBar().hide()
+        if self.main_tabs.cornerWidget(Qt.TopLeftCorner):
+            self.main_tabs.cornerWidget(Qt.TopLeftCorner).hide()
+        self.statusBar().hide()
+        self._focus = (hidden, btn, self.isMaximized())
+        btn.setText("⤡ Exit full screen")
+        self.showFullScreen()
+
+    def exit_focus(self):
+        f = getattr(self, "_focus", None)
+        if not f:
+            return
+        hidden, btn, was_max = f
+        self._focus = None
+        for w in hidden:
+            w.show()
+        self.main_tabs.tabBar().show()
+        if self.main_tabs.cornerWidget(Qt.TopLeftCorner):
+            self.main_tabs.cornerWidget(Qt.TopLeftCorner).show()
+        self.statusBar().show()
+        btn.setText("⛶ Full screen")
+        self.showMaximized() if was_max else self.showNormal()
+
     def _current_profile(self) -> Profile:
         return Profile(
             name=self.profile_box.currentText() or "Default", role=self.role.currentText(),
@@ -783,6 +882,32 @@ class MainWindow(QMainWindow):
         i = self.mic_box.findData(self.settings.mic)
         self.mic_box.setCurrentIndex(max(0, i))
 
+    PREVIEW_LINE = ("Okay, that's a reasonable start. But you said the cache is always consistent. Are you sure? "
+                    "Walk me through what happens when two writes hit the same key.")
+
+    def _preview_voice(self):
+        voice, spk = self.voice.currentData().split("#")
+        spk = int(spk) if spk else None
+        self.voice_preview.setEnabled(False)
+        self.b.status.emit("Loading the voice…")
+
+        def work():
+            from .tts import Speaker
+            try:
+                key = (voice_key(voice, spk), self.settings.speech_rate)
+                if self.speaker is None or getattr(self, "_voice_key", None) != key:
+                    if self.speaker:
+                        self.speaker.stop()
+                    self.speaker = Speaker(voice, spk, self.settings.speech_rate, progress=self.b.status.emit)
+                    self._voice_key = key
+                self.speaker.stop()
+                self.speaker.say(self.PREVIEW_LINE)
+                self.b.status.emit("Playing preview…")
+            except Exception as e:  # noqa: BLE001
+                self.b.status.emit(f"Voice preview failed: {e}")
+            self.b.restore_voice_preview.emit()
+        run_bg(self.b, work, busy=False)
+
     def _test_mic(self):
         node = self.mic_box.currentData() or ""
         self.mic_test.setEnabled(False)
@@ -825,7 +950,7 @@ class MainWindow(QMainWindow):
             status(f"Loading speech model {s.whisper_model} (first run downloads it)…")
             self.transcriber = Transcriber(s.whisper_model)
             self._whisper_name = s.whisper_model
-        key = voice_key(s.voice, s.voice_speaker)
+        key = (voice_key(s.voice, s.voice_speaker), s.speech_rate)
         if s.speak_questions and (self.speaker is None or getattr(self, "_voice_key", None) != key):
             status("Loading voice…")
             self.speaker = Speaker(s.voice, s.voice_speaker, s.speech_rate, progress=status)
@@ -874,7 +999,8 @@ class MainWindow(QMainWindow):
 
         if self.live and turn.kind != "wrap":
             self.q_card.setText(f"{meta_html}<br><br><span style='color:#8b93ab'>Arjun is asking…</span>")
-            self.live.new_question(turn.question, on_start=reveal)
+            self.live.new_question(turn.question, on_start=reveal, kind=turn.kind,
+                                   first=len(self.session.turns) <= 1)
         else:
             reveal()
             if self.speaker and self.speak.isChecked():

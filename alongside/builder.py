@@ -19,6 +19,7 @@ from . import screen, soft
 from .interview import ROLES
 from .knowledge import DIFFICULTIES
 from .richview import RichView
+from .responsive import make_responsive, reflow
 
 
 def _font(size: int, bold: bool = False) -> QFont:
@@ -130,7 +131,7 @@ class RoundBuilder(QWidget):
         self.clear_btn.setToolTip("Clear this screen, and optionally delete saved company research")
         self.clear_btn.clicked.connect(self.clear_setup)
         rb.addWidget(self.research_btn, 2); rb.addWidget(self.reresearch_btn, 1); rb.addWidget(self.clear_btn, 1)
-        lv.addLayout(rb)
+        lv.addWidget(reflow(rb))
         self.research_log = QPlainTextEdit(readOnly=True)
         self.research_log.setMaximumHeight(130)
         self.research_log.setPlaceholderText("Research progress appears here (takes 1-4 minutes).")
@@ -153,15 +154,17 @@ class RoundBuilder(QWidget):
         rem = QPushButton("Remove selected"); rem.clicked.connect(
             lambda: self.rounds.removeRow(self.rounds.currentRow()) if self.rounds.currentRow() >= 0 else None)
         rr.addWidget(add); rr.addWidget(rem); rr.addStretch()
-        mv.addLayout(rr)
+        mv.addWidget(reflow(rr))
         of = QFormLayout()
-        self.patience = QDoubleSpinBox(minimum=1.5, maximum=10.0, singleStep=0.5,
+        self.patience = QDoubleSpinBox(minimum=1.0, maximum=6.0, singleStep=0.5,
                                        value=self.host.settings.answer_pause, suffix=" s")
         self.patience.setToolTip("How long you must be silent before the interviewer treats your turn as finished")
         self.time_scale = QDoubleSpinBox(minimum=0.25, maximum=1.5, singleStep=0.25, value=1.0, suffix="×")
         self.time_scale.setToolTip("Scale all round durations, e.g. 0.5× for a quick practice loop")
-        self.watch_screen = QCheckBox("Also look at my whole screen every 90 s (for external IDE / whiteboard)")
-        self.headphones = QCheckBox("I'm wearing headphones (let me interrupt the interviewer)")
+        self.watch_screen = QCheckBox("Watch my screen every 90 s")
+        self.headphones = QCheckBox("Headphones / earbuds")
+        self.headphones.setToolTip("Mic stays on while the interviewer talks")
+        self.watch_screen.setToolTip("For an external IDE or whiteboard app: the interviewer looks at your whole screen")
         of.addRow("Wait after you stop talking", self.patience)
         of.addRow("Time scale", self.time_scale)
         mv.addLayout(of)
@@ -175,6 +178,8 @@ class RoundBuilder(QWidget):
         self.research_view.setMarkdown("_Research results (rounds, reported questions, tips, sources) show here._")
         split.addWidget(left); split.addWidget(mid); split.addWidget(self.research_view)
         split.setSizes([330, 470, 520])
+        left.setMinimumWidth(240); mid.setMinimumWidth(260)
+        make_responsive(w)
         return w
 
     def _add_round_row(self, r: dict, use: bool = True):
@@ -631,8 +636,7 @@ class RoundBuilder(QWidget):
 
     def _watch_tts(self):
         sp = self.host.speaker
-        if self.headphones.isChecked() and self.listener and self.listener.in_speech and sp and sp.busy:
-            sp.stop()  # barge-in: you started talking over the interviewer
+        # The interviewer always finishes speaking (no barge-in); with headphones you're still heard meanwhile.
         if sp and sp.busy:
             return
         self.tts_watch.stop()

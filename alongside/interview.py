@@ -353,6 +353,7 @@ language tag and complexity, a table for trade-offs, and a ```mermaid diagram fo
         seg = self.agenda[seg_i]["title"] if self.agenda else ""
         coding = turn.segment in ("coding", "machine_coding", "design")
         convo = "\n".join(f"{w} [{k}]: {t}" for w, t, k in turn.exchanges[-20:]) or "(nothing yet)"
+        pause = "about 1.5 seconds" if event == "utterance" else "n/a"
         prompt = f"""You are mid-interview, on this question:
 "{turn.question}"
 Segment: {seg} ({seg_left / 60:.1f} min left in it; {max(0, self.remaining()) / 60:.1f} min left in the interview).
@@ -367,11 +368,17 @@ What has been said on this question (candidate speech is speech-to-text):
 Trigger: {{"utterance": "the candidate just finished speaking", "code": "the candidate paused after typing in the pad", \
 "silence": "the candidate has been silent for a while", "typed": "the candidate typed a message"}}[{event!r}]
 
+
+Turn-taking rules (very important, you are on a live voice call):
+- The candidate only PAUSED for a moment ({pause}). People pause to think mid-answer. If their last words sound unfinished (mid-sentence, "so…", "and then", listing steps, building up to a point) choose "listen" and stay quiet.
+- Speak after an "utterance" only when they clearly finished a thought or asked you something: then react to WHAT they said (probe, push back, clarify), never with generic encouragement.
+- Never say "take your time" / "no rush" / "talk me through your thinking" after an "utterance": that is only for the "silence" trigger, when they've said nothing at all for a while.
+
 Behave like a real interviewer on a call. Decide ONE action:
 - "listen": they're mid-explanation, thinking aloud, or coding productively; don't interrupt.
 - "speak": short (1-2 sentences, spoken English, no markdown): answer a clarifying question without giving the \
 solution away; push back on a wrong or vague claim ("Are you sure?", "Why?"); quick probe on a missing piece; nudge \
-if stuck or silent ("Talk me through what you're thinking."); a small hint ONLY if they're clearly stuck for a long \
+ONLY on the "silence" trigger ("Take your time. Talk me through what you're thinking."); a small hint ONLY if they're clearly stuck for a long \
 time or ask for one (kind "hint"); remind about time if the segment is nearly over.
 - "next": the answer is complete (they finished and paused, said they're done, or for coding they've explained the \
 solution and you've covered complexity/edge cases), OR the segment time is up. Optionally add a brief neutral \

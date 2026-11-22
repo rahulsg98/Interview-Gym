@@ -270,6 +270,12 @@ Conversation so far (candidate speech is from speech-to-text):
 Trigger: {{"utterance": "the candidate just finished speaking", "code": "the candidate has been typing and paused", \
 "silence": "the candidate has been quiet for a while", "typed": "the candidate typed a message to you", "screen": "periodic look at the candidate's screen (attached)"}}[{event!r}]
 
+
+Turn-taking rules (very important, you are on a live voice call):
+- The candidate only PAUSED for a moment (a second or two). People pause to think mid-answer. If their last words sound unfinished (mid-sentence, "so…", "and then", listing steps, building up to a point) choose "listen" and stay quiet.
+- Speak after an "utterance" only when they clearly finished a thought or asked you something: then react to WHAT they said (probe, push back, clarify), never with generic encouragement.
+- Never say "take your time" / "no rush" / "talk me through your thinking" after an "utterance": that is only for the "silence" trigger, when they've said nothing at all for a while.
+
 Return JSON: {{"action": "listen" | "speak", "say": "<if speak: what you say>", "move_on": <true|false>}}"""
         return llm.ask_json(prompt, self.system_for(r), self.model, images)
 
