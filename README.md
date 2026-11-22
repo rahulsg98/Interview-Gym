@@ -25,7 +25,10 @@ He also judges your **communication and confidence**, from your voice and your w
   - **2 hr:** resume, theory, coding, machine coding and HLD
 
   A countdown and the agenda are shown above the chat. Questions follow the current segment, and the interview ends when time is up.
-- **Code / design pad:** coding and design questions switch to a pad that Arjun reads, alongside your spoken answer. To draw diagrams, use a whiteboard app and press **Review my screen**.
+- **One big workspace:** the live screen has a single editor that Arjun reads, next to the question and chat. What you *say* is captured automatically and shown in a slim **Heard** line above it.
+  - Pick a **Language** (Java, Python, C++, C, JavaScript, TypeScript, Go, Kotlin, SQL, Bash, YAML/JSON) for syntax colouring, line numbers and auto-indent. Enter keeps the indent and adds a level after `{` `(` `[` (or `:` in Python). Tab and Shift+Tab indent and dedent, also for a selection. A closing bracket on an empty line dedents itself. There is no compiler.
+  - **Notes** mode is for theory and system design: headings, bullets and **{ } Code block** snippets (```` ```java ```` … ```` ``` ````), each coloured in its own language.
+  - Coding questions switch to your last-used language; theory and design switch to Notes. To draw diagrams, use a whiteboard app and press **Review my screen**.
 
 ## Only completed interviews count
 An interview is **completed** when:
@@ -70,7 +73,7 @@ For the camera to work well, sit **facing** a light source, not with a window or
 | Questions, scoring, research, screen and camera review | Claude, through the Claude Code CLI (`claude -p`) with your subscription login. Web search is used for company research. | No API key |
 | Speech to text | faster-whisper (`small.en`, int8 on the CPU) | Free, offline |
 | Voice | Piper TTS, `en_US-l2arctic` speaker ASI (Indian English male) | Free, offline |
-| Hands-free listening | Voice-activity detection on `arecord`; it waits for a pause (2 s by default) before replying | Local |
+| Hands-free listening | Voice-activity detection on `arecord`. Your speech is transcribed in pieces *while* you talk, so your words are ready about 1 s after the 2 s pause. Arjun never treats "still transcribing" as silence, and his text appears the moment his voice starts. | Local |
 | Camera | OpenCV and the YuNet face detector | Local |
 | Screen capture | xdg-desktop-portal Screenshot | Built in |
 | Data | SQLite at `~/.local/share/alongside/progress.db`, sessions in `~/.local/share/alongside/sessions` | Local |
@@ -128,6 +131,7 @@ alongside/
   soft.py       speech delivery metrics, webcam tracker, soft-skill rubric
   dashboard.py  progress + soft-skills dashboard (QtCharts)
   progress.py   SQLite progress store and queries
+  editor.py     workspace editor: languages, syntax colouring, auto-indent, code blocks
   llm.py        Claude via `claude -p` (stream-json, tools)
   stt.py        push-to-talk recorder, hands-free listener, faster-whisper
   tts.py        Piper voice playback

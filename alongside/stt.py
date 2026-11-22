@@ -72,26 +72,35 @@ class Transcriber:
 
         self.model = WhisperModel(model, device="cpu", compute_type="int8",
                                   download_root=str(MODELS_DIR / "whisper"))
+        self._lock = threading.Lock()  # one transcription at a time: parallel runs just fight for the CPU
 
-    def transcribe(self, audio: np.ndarray) -> str:
-        if audio.size < RATE // 2:
+    def transcribe(self, audio: np.ndarray, context: str = "") -> str:
+        if audio.size < RATE // 3:
             return ""
-        segments, _ = self.model.transcribe(
-            audio, language="en", beam_size=1, vad_filter=True,
-            initial_prompt=TECH_PROMPT, condition_on_previous_text=False,
-        )
-        return " ".join(s.text.strip() for s in segments).strip()
+        prompt = TECH_PROMPT + (" " + context[-200:] if context else "")
+        with self._lock:
+            segments, _ = self.model.transcribe(
+                audio, language="en", beam_size=1, vad_filter=True,
+                initial_prompt=prompt, condition_on_previous_text=False,
+            )
+            return " ".join(s.text.strip() for s in segments).strip()
 
 
 class Listener:
-    """Hands-free, always-on mic. Waits until you have finished speaking (silence_sec of quiet)
-    and then hands the whole utterance to on_utterance(audio). `in_speech` is True while you talk,
-    so callers can hold back the interviewer until you are done ("hear everything before speaking")."""
+    """Hands-free, always-on mic with energy-based voice-activity detection.
 
-    FRAME = 480  # 30 ms at 16 kHz
+    While you talk it hands finished pieces of speech (cut at short natural pauses) to
+    on_segment(audio, final=False) so they can be transcribed *while you are still speaking*.
+    When you have been quiet for silence_sec it sends the rest with final=True: the utterance is over.
+    `in_speech` is True while you talk, so callers can hold back the interviewer ("hear everything first")."""
 
-    def __init__(self, on_utterance, silence_sec: float = 2.0, min_speech_sec: float = 0.5):
-        self.on_utterance = on_utterance
+    FRAME = 480          # 30 ms at 16 kHz
+    PAUSE_SEC = 0.45     # a pause this long inside speech is a good place to cut a piece
+    MIN_PIECE_SEC = 3.0  # don't cut pieces shorter than this (Whisper needs some context)
+    MAX_PIECE_SEC = 20.0 # force a cut if you talk this long without pausing
+
+    def __init__(self, on_segment, silence_sec: float = 2.0, min_speech_sec: float = 0.5):
+        self.on_segment = on_segment
         self.silence_sec = silence_sec
         self.min_speech_sec = min_speech_sec
         self.muted = False
@@ -107,7 +116,7 @@ class Listener:
             ["arecord", "-q", "-f", "S16_LE", "-r", str(RATE), "-c", "1", "-t", "raw"],
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
         )
-        threading.Thread(target=self._run, daemon=True).start()
+        threading.Thread(target=self._run, args=(self._proc,), daemon=True).start()
 
     def stop(self) -> None:
         self._stop.set()
@@ -121,17 +130,30 @@ class Listener:
     def running(self) -> bool:
         return self._proc is not None
 
-    def _run(self) -> None:
+    def _run(self, proc) -> None:
         import time
-        proc = self._proc
         assert proc and proc.stdout
         nbytes = self.FRAME * 2
+        fps = 1 / 0.03
         noise: list[float] = []
         thr = 0.015
         pre_roll: list[np.ndarray] = []
         speech: list[np.ndarray] = []
+        sent = 0                 # frames of `speech` already handed over as pieces
+        voiced_total = 0         # voiced frames in this utterance
         voiced_frames = silent_frames = 0
-        silence_limit = int(self.silence_sec / 0.03)
+        silence_limit = int(self.silence_sec * fps)
+        pause_limit = int(self.PAUSE_SEC * fps)
+        min_piece, max_piece = int(self.MIN_PIECE_SEC * fps), int(self.MAX_PIECE_SEC * fps)
+
+        def finish(upto: int) -> None:
+            nonlocal speech, pre_roll, sent, voiced_total, voiced_frames, silent_frames
+            if sent > 0 or voiced_total * 0.03 >= self.min_speech_sec:
+                rest = speech[sent:upto]
+                self.on_segment(np.concatenate(rest) if rest else np.zeros(0, np.float32), True)
+            speech, pre_roll, sent, voiced_total, voiced_frames, silent_frames = [], [], 0, 0, 0, 0
+            self.in_speech = False  # only after the final piece is queued, so callers never see a gap
+
         while not self._stop.is_set():
             raw = proc.stdout.read(nbytes)
             if not raw or len(raw) < nbytes:
@@ -145,8 +167,9 @@ class Listener:
                     thr = max(0.012, float(np.median(noise)) * 3.0)
                 continue
             if self.muted:
-                pre_roll.clear(); speech.clear(); voiced_frames = silent_frames = 0
-                self.in_speech = False
+                if self.in_speech:
+                    finish(len(speech))  # keep what you already said
+                pre_roll.clear(); voiced_frames = 0
                 continue
             loud = rms > thr
             if not self.in_speech:
@@ -154,21 +177,116 @@ class Listener:
                 pre_roll = pre_roll[-10:]
                 voiced_frames = voiced_frames + 1 if loud else 0
                 if voiced_frames >= 3:
-                    self.in_speech = True
                     speech = list(pre_roll)
-                    silent_frames = 0
+                    sent, voiced_total, silent_frames = 0, voiced_frames, 0
                     self.last_voice = time.time()
+                    self.in_speech = True
                 continue
             speech.append(frame)
             if loud:
                 silent_frames = 0
+                voiced_total += 1
                 self.last_voice = time.time()
             else:
                 silent_frames += 1
             if silent_frames >= silence_limit:
-                self.in_speech = False
-                voiced = len(speech) - silent_frames
-                audio = np.concatenate(speech[: len(speech) - silent_frames + 5])
-                speech, pre_roll, voiced_frames, silent_frames = [], [], 0, 0
-                if voiced * 0.03 >= self.min_speech_sec:
-                    self.on_utterance(audio)
+                finish(len(speech) - silent_frames + 5)
+                continue
+            piece = len(speech) - sent
+            if (silent_frames == pause_limit and piece >= min_piece) or piece >= max_piece:
+                self.on_segment(np.concatenate(speech[sent:]), False)
+                sent = len(speech)
+
+
+class LiveMic:
+    """Listener + one background transcriber that keeps up while you speak.
+
+    on_text(text, audio) fires once per finished utterance (full text, full audio);
+    on_partial(text_so_far) fires as pieces are transcribed. Both run on a worker thread.
+    `busy` is True from the moment you start talking until the final text has been delivered,
+    so nobody mistakes "still transcribing" for "the candidate is silent"."""
+
+    def __init__(self, transcriber: Transcriber, on_text, on_partial=None, silence_sec: float = 2.0):
+        import queue
+        self.transcriber = transcriber
+        self.on_text = on_text
+        self.on_partial = on_partial
+        self.listener = Listener(self._segment, silence_sec=silence_sec)
+        self._q: queue.Queue = queue.Queue()
+        self._pending = 0
+        self._lock = threading.Lock()
+        self._alive = False
+
+    # pass-throughs so callers can use this like a Listener
+    @property
+    def muted(self) -> bool:
+        return self.listener.muted
+
+    @muted.setter
+    def muted(self, value: bool) -> None:
+        self.listener.muted = value
+
+    @property
+    def in_speech(self) -> bool:
+        return self.listener.in_speech
+
+    @property
+    def level(self) -> float:
+        return self.listener.level
+
+    @property
+    def transcribing(self) -> bool:
+        return self._pending > 0
+
+    @property
+    def busy(self) -> bool:
+        return self.listener.in_speech or self._pending > 0
+
+    def start(self) -> None:
+        self._alive = True
+        threading.Thread(target=self._work, daemon=True).start()
+        self.listener.start()
+
+    def stop(self) -> None:
+        self._alive = False
+        self.listener.stop()
+        self._q.put(None)
+
+    def _segment(self, audio: np.ndarray, final: bool) -> None:
+        with self._lock:
+            self._pending += 1
+        self._q.put((audio, final))
+
+    def _work(self) -> None:
+        import logging
+        texts: list[str] = []
+        audios: list[np.ndarray] = []
+        while True:
+            item = self._q.get()
+            if item is None:
+                return
+            audio, final = item
+            try:
+                if not self._alive:
+                    continue
+                text = self.transcriber.transcribe(audio, context=" ".join(texts)) if audio.size else ""
+                if text:
+                    texts.append(text)
+                if audio.size:
+                    audios.append(audio)
+                if not final:
+                    if text and self.on_partial:
+                        self.on_partial(" ".join(texts))
+                    continue
+                full = " ".join(texts).strip()
+                whole = np.concatenate(audios) if audios else np.zeros(0, np.float32)
+                texts, audios = [], []
+                if full and self._alive:
+                    self.on_text(full, whole)
+            except Exception:  # noqa: BLE001
+                logging.exception("Transcription failed")
+                if final:
+                    texts, audios = [], []
+            finally:
+                with self._lock:
+                    self._pending -= 1

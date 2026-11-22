@@ -64,7 +64,9 @@ def _wav(pcm: bytes, rate: int) -> bytes:
 
 
 class Speaker:
-    """Speaks text sentence by sentence on a background thread. stop() interrupts."""
+    """Speaks text sentence by sentence. One thread synthesises ahead while another plays, so there are no
+    gaps between sentences. say(text, on_start) calls on_start() (from a worker thread) the moment the first
+    sentence actually starts playing, so callers can show the text in sync with the voice. stop() interrupts."""
 
     def __init__(self, voice: str, speaker: int | None, rate: float = 1.0, progress=None):
         from piper import PiperVoice, SynthesisConfig
@@ -74,12 +76,14 @@ class Speaker:
         self.cfg = SynthesisConfig(speaker_id=speaker, length_scale=rate)
         self.rate = self.voice.config.sample_rate
         self.last_error = ""
-        self._q: queue.Queue[str | None] = queue.Queue()
+        self._text_q: queue.Queue = queue.Queue()   # (gen, sentence, on_start)
+        self._play_q: queue.Queue = queue.Queue(maxsize=2)  # (gen, pcm, on_start)
         self._proc: subprocess.Popen | None = None
         self._gen = 0
-        self._active = False  # True from dequeue until playback of that sentence ends
+        self._inflight = 0  # sentences queued, being synthesised or playing
         self._lock = threading.Lock()
-        threading.Thread(target=self._loop, daemon=True).start()
+        threading.Thread(target=self._synth_loop, daemon=True).start()
+        threading.Thread(target=self._play_loop, daemon=True).start()
 
     @staticmethod
     def clean(text: str) -> str:
@@ -89,42 +93,75 @@ class Speaker:
         text = re.sub(r"https?://\S+", "", text)
         return re.sub(r"\s+", " ", text).strip()
 
-    def say(self, text: str) -> None:
-        text = self.clean(text)
-        for sentence in re.split(r"(?<=[.!?])\s+", text):
-            if sentence.strip():
-                self._q.put(sentence)
+    def say(self, text: str, on_start=None) -> None:
+        sentences = [x for x in re.split(r"(?<=[.!?])\s+", self.clean(text)) if x.strip()]
+        if not sentences:
+            if on_start:
+                on_start()
+            return
+        with self._lock:
+            gen = self._gen
+            self._inflight += len(sentences)
+        for i, sentence in enumerate(sentences):
+            self._text_q.put((gen, sentence, on_start if i == 0 else None))
 
     def stop(self) -> None:
         with self._lock:
             self._gen += 1
-            while not self._q.empty():
-                try:
-                    self._q.get_nowait()
-                except queue.Empty:
-                    break
             if self._proc and self._proc.poll() is None:
                 self._proc.kill()
 
     @property
     def busy(self) -> bool:
-        return self._active or not self._q.empty() or (self._proc is not None and self._proc.poll() is None)
+        return self._inflight > 0
 
-    def _loop(self) -> None:
-        while True:
-            sentence = self._q.get()
-            if sentence is None:
-                return
-            self._active = True
+    def _done(self) -> None:
+        with self._lock:
+            self._inflight = max(0, self._inflight - 1)
+
+    @staticmethod
+    def _fire(cb) -> None:
+        if cb:
             try:
-                gen = self._gen
+                cb()
+            except Exception:  # noqa: BLE001
+                import logging
+                logging.exception("on_start callback failed")
+
+    def _synth_loop(self) -> None:
+        while True:
+            gen, sentence, cb = self._text_q.get()
+            if gen != self._gen:
+                self._fire(cb)  # interrupted before it was spoken: still let the caller show the text
+                self._done()
+                continue
+            try:
                 pcm = b"".join(c.audio_int16_bytes for c in self.voice.synthesize(sentence, self.cfg))
+            except Exception as e:  # noqa: BLE001
+                import logging
+                logging.exception("TTS failed")
+                self.last_error = str(e)
+                self._fire(cb)
+                self._done()
+                continue
+            self._play_q.put((gen, pcm, cb))
+
+    def _play_loop(self) -> None:
+        import logging
+        while True:
+            gen, pcm, cb = self._play_q.get()
+            try:
+                if gen != self._gen:
+                    self._fire(cb)
+                    continue
                 with self._lock:
                     if gen != self._gen:
+                        self._fire(cb)
                         continue
                     self._proc = subprocess.Popen(_player(), stdin=subprocess.PIPE,
                                                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
                 proc = self._proc
+                self._fire(cb)
                 try:
                     proc.stdin.write(_wav(pcm, self.rate))
                     proc.stdin.close()
@@ -133,12 +170,10 @@ class Speaker:
                 proc.wait()
                 if proc.returncode not in (0, -9, -15) and gen == self._gen:
                     err = proc.stderr.read().decode(errors="ignore").strip() if proc.stderr else ""
-                    import logging
                     logging.error("Audio playback failed (%s): %s", proc.returncode, err)
                     self.last_error = err or f"player exit code {proc.returncode}"
             except Exception as e:  # noqa: BLE001
-                import logging
-                logging.exception("TTS failed")
+                logging.exception("Audio playback failed")
                 self.last_error = str(e)
             finally:
-                self._active = self._q.qsize() > 0
+                self._done()

@@ -28,6 +28,7 @@ class Settings:
     use_camera: bool = True
     hands_free: bool = True
     headphones: bool = False
+    code_language: str = "Java"           # default language for coding questions in the workspace
     profiles: dict = field(default_factory=dict)  # name -> {role, resume, jd, focus}
 
     @classmethod

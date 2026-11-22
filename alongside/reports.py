@@ -29,8 +29,8 @@ def _fmt_dur(sec: float) -> str:
 
 def _score_color(v) -> str:
     if not isinstance(v, (int, float)):
-        return "#9aa0ac"
-    return "#1f9d63" if v >= 7.5 else "#c98a1b" if v >= 6 else "#c0392b"
+        return "#8b93ab"
+    return "#34d399" if v >= 7.5 else "#fbbf24" if v >= 6 else "#fb7185"
 
 
 def load_records() -> list[dict]:
@@ -148,31 +148,31 @@ def history_html(r: dict) -> str:
     """Full chronological conversation."""
     d = r["data"]
 
-    def line(who, text, color="#e6e6e6", note=""):
-        who_c = {"Arjun": "#7fb2ff", "You": "#7ee0a8"}.get(who, "#f5c26b")
-        n = f' <span style="color:#6b7080">({html.escape(note)})</span>' if note else ""
+    def line(who, text, color="#e9ecf5", note=""):
+        who_c = {"Arjun": "#a78bfa", "You": "#5eead4"}.get(who, "#fbbf24")
+        n = f' <span style="color:#5d6580">({html.escape(note)})</span>' if note else ""
         return (f'<p style="margin:6px 0"><b style="color:{who_c}">{html.escape(who)}</b>{n}<br>'
                 f'<span style="color:{color}">{html.escape(text).replace(chr(10), "<br>")}</span></p>')
 
     def code_block(code):
-        return (f'<pre style="background:#1d2027;border:1px solid #2c313b;padding:8px;color:#e6e6e6">'
+        return (f'<pre style="background:#161a26;border:1px solid #252b3d;padding:8px;color:#e9ecf5">'
                 f'{html.escape(code)}</pre>')
 
     parts = []
     if r["kind"] == "loop":
         for i, rd in enumerate(d.get("rounds", []), 1):
-            parts.append(f'<h3 style="color:#e6e6e6">Round {i}: {html.escape(rd.get("name", ""))} '
+            parts.append(f'<h3 style="color:#e9ecf5">Round {i}: {html.escape(rd.get("name", ""))} '
                          f'({html.escape(rd.get("type", ""))}, {rd.get("duration_min")} min)</h3>')
             st = rd.get("problem", {}).get("statement", "")
             if st:
-                parts.append(f'<p style="color:#9aa0ac">{html.escape(st).replace(chr(10), "<br>")}</p>')
+                parts.append(f'<p style="color:#8b93ab">{html.escape(st).replace(chr(10), "<br>")}</p>')
             for ts, who, text in rd.get("log", []):
                 t0 = rd.get("started") or ts
                 stamp = f"{int(ts - t0) // 60:02d}:{int(ts - t0) % 60:02d}"
                 parts.append(line("Arjun" if who == "Interviewer" else "You" if who.startswith("You") else who,
                                   text, note=stamp))
             if rd.get("code"):
-                parts.append("<b style='color:#9aa0ac'>Your editor</b>" + code_block(rd["code"]))
+                parts.append("<b style='color:#8b93ab'>Your editor</b>" + code_block(rd["code"]))
         return "".join(parts) or "<i>No history.</i>"
     for i, t in enumerate(d.get("turns", []), 1):
         tag = {"followup": "follow-up", "wrap": "close"}.get(t.get("kind"), f"Q{i}")
@@ -188,7 +188,7 @@ def history_html(r: dict) -> str:
         if t.get("answer") and not spoke:
             parts.append(line("You", t["answer"]))
         if t.get("code", "").strip():
-            parts.append("<b style='color:#9aa0ac'>Your pad</b>" + code_block(t["code"]))
+            parts.append("<b style='color:#8b93ab'>Your pad</b>" + code_block(t["code"]))
         for note in t.get("screen_notes", []):
             parts.append(line("Arjun", note, note="looking at your screen"))
     return "".join(parts) or "<i>No history.</i>"
@@ -210,9 +210,9 @@ def overview_html(r: dict) -> str:
     if r["kind"] == "interview":
         n = sum(1 for t in d.get("turns", []) if (t.get("feedback") or {}).get("score") is not None)
         rows.append(("Questions scored", str(n)))
-    cells = "".join(f'<tr><td style="color:#9aa0ac;padding:2px 14px 2px 0">{html.escape(k)}</td>'
-                    f'<td style="color:#e6e6e6">{html.escape(str(v))}</td></tr>' for k, v in rows)
-    return f'<div>{sc}&nbsp;&nbsp;<span style="color:#9aa0ac">average score</span></div><table>{cells}</table>'
+    cells = "".join(f'<tr><td style="color:#8b93ab;padding:2px 14px 2px 0">{html.escape(k)}</td>'
+                    f'<td style="color:#e9ecf5">{html.escape(str(v))}</td></tr>' for k, v in rows)
+    return f'<div>{sc}&nbsp;&nbsp;<span style="color:#8b93ab">average score</span></div><table>{cells}</table>'
 
 
 def delete_record(r: dict) -> None:
@@ -269,7 +269,7 @@ class PastInterviews(QWidget):
         self.list.setSpacing(3)
         self.list.currentItemChanged.connect(lambda cur, _prev: self._open(cur))
         lv.addWidget(self.list, 1)
-        self.count = QLabel(""); self.count.setStyleSheet("color:#9aa0ac")
+        self.count = QLabel(""); self.count.setStyleSheet("color:#8b93ab")
         lv.addWidget(self.count)
 
         right = QWidget(); rv = QVBoxLayout(right)
@@ -294,7 +294,7 @@ class PastInterviews(QWidget):
         learn_box = QWidget(); lb = QVBoxLayout(learn_box); lb.setContentsMargins(0, 4, 0, 0)
         lrow = QHBoxLayout()
         self.learn_status = QLabel("")
-        self.learn_status.setStyleSheet("color:#9aa0ac")
+        self.learn_status.setStyleSheet("color:#8b93ab")
         self.learn_btn = QPushButton("Generate learnings", objectName="primary")
         self.learn_btn.setToolTip("Write detailed study notes for every question: ideal answer, key points, your "
                                   "mistakes, how to say it, follow-ups and what to study")
@@ -471,7 +471,7 @@ class PastInterviews(QWidget):
         self.current = None
         self.list.clearSelection()
         self.title.setText(title)
-        self.overview.setText('<span style="color:#c98a1b">Scoring your answers and writing the report…</span>')
+        self.overview.setText('<span style="color:#fbbf24">Scoring your answers and writing the report…</span>')
         self.fb.setMarkdown("_Feedback appears here once scoring finishes._")
         self.history.clear()
         self.report.setMarkdown("_Writing your report…_")

@@ -37,6 +37,8 @@ class LiveBridge(QObject):
     error = Signal(str)
     screen_shot = Signal(object)
     saved = Signal(str)
+    partial = Signal(str)
+    main = Signal(object)    # run a callable on the GUI thread
 
 
 class RoundBuilder(QWidget):
@@ -54,6 +56,7 @@ class RoundBuilder(QWidget):
         self.loop: L.Loop | None = None
         self.idx = -1
         self.listener = None
+        self._heard = ""
         self.remaining = 0
         self.paused = False
         self.reacting = False
@@ -84,6 +87,8 @@ class RoundBuilder(QWidget):
         b.problem.connect(self._on_problem)
         b.utterance.connect(self._on_utterance)
         b.reaction.connect(self._on_reaction)
+        b.partial.connect(self._on_partial)
+        b.main.connect(lambda fn: fn())
         b.round_done.connect(self._on_round_done)
         b.report.connect(lambda t: self.report_view.setMarkdown(t))
         b.error.connect(self._on_error)
@@ -236,7 +241,7 @@ class RoundBuilder(QWidget):
         w = QWidget(); v = QVBoxLayout(w)
         top = QHBoxLayout()
         self.round_lbl = QLabel(); self.round_lbl.setFont(_font(14, True))
-        self.state_lbl = QLabel("…"); self.state_lbl.setStyleSheet("color:#9aa0ac")
+        self.state_lbl = QLabel("…"); self.state_lbl.setStyleSheet("color:#8b93ab")
         self.timer_lbl = QLabel("00:00"); self.timer_lbl.setFont(_font(24, True))
         self.pause_btn = QPushButton("Pause"); self.pause_btn.clicked.connect(self.toggle_pause)
         self.done_btn = QPushButton("I'm done → next round"); self.done_btn.clicked.connect(self.end_round)
@@ -258,20 +263,17 @@ class RoundBuilder(QWidget):
         self.say_box.returnPressed.connect(self._typed_message)
         cv.addWidget(self.conv_view, 1); cv.addWidget(self.say_box)
         left.addWidget(self.problem_view); left.addWidget(conv); left.setSizes([330, 330])
-        right = QWidget(); rv = QVBoxLayout(right); rv.setContentsMargins(0, 0, 0, 0)
-        hl = QHBoxLayout()
-        hl.addWidget(QLabel("Editor · the interviewer sees everything you type here"))
-        hl.addStretch()
-        self.lang = QComboBox(); self.lang.addItems(["Java", "Python", "C++", "JavaScript", "TypeScript", "Go",
-                                                      "Plain notes / design"])
-        hl.addWidget(self.lang)
-        rv.addLayout(hl)
-        self.editor = QPlainTextEdit()
-        mono = QFontDatabase.systemFont(QFontDatabase.FixedFont); mono.setPointSize(12)
-        self.editor.setFont(mono)
-        self.editor.setTabStopDistance(4 * self.editor.fontMetrics().horizontalAdvance(" "))
+        from .editor import Workspace
+        right = QWidget(objectName="card"); rv = QVBoxLayout(right); rv.setContentsMargins(12, 10, 12, 12)
+        self.workspace = Workspace("Workspace · the interviewer sees everything you type here",
+                                   language=self.host.settings.code_language)
+        self.workspace.code_lang = self.host.settings.code_language
+        self.workspace.language_changed.connect(self.host._on_ws_language)
+        self.editor = self.workspace.editor
+        self.editor.setPlaceholderText("Write code here (pick the language above), or notes and design with "
+                                       "{ } Code block snippets. Think aloud while you write.")
         self.editor.textChanged.connect(self._on_edit)
-        rv.addWidget(self.editor)
+        rv.addWidget(self.workspace)
         split.addWidget(left); split.addWidget(right); split.setSizes([560, 700])
         v.addWidget(split, 1)
 
@@ -280,9 +282,9 @@ class RoundBuilder(QWidget):
         self.cam_view.setFixedSize(160, 120)
         self.cam_view.setScaledContents(True)
         self.cam_view.setAlignment(Qt.AlignCenter)
-        self.cam_view.setStyleSheet("background:#1d2027; border:1px solid #2c313b; border-radius:6px; color:#6b7080")
+        self.cam_view.setStyleSheet("background:#161a26; border:1px solid #252b3d; border-radius:6px; color:#5d6580")
         self.cam_stats = QLabel("")
-        self.cam_stats.setStyleSheet("color:#9aa0ac")
+        self.cam_stats.setStyleSheet("color:#8b93ab")
         bottom.addWidget(self.cam_view)
         self.mic_on = QCheckBox("Mic live (hands-free)", checked=True)
         self.mic_on.toggled.connect(lambda on: self.listener and setattr(self.listener, "muted", not on))
@@ -362,6 +364,9 @@ class RoundBuilder(QWidget):
         r = self.loop.rounds[self.idx]
         self.round_lbl.setText(f"{self.loop.company} · Round {self.idx + 1}/{len(self.loop.rounds)}: {r.name}")
         self.editor.clear(); self.code_seen = ""
+        if r.type == "Frontend Machine Coding" and self.workspace.code_lang not in ("JavaScript", "TypeScript"):
+            self.workspace.code_lang = "JavaScript"
+        self.workspace.set_language(self.workspace.code_lang if r.type in L.CODING_TYPES else "Notes")
         self.problem_view.setMarkdown("_Preparing the problem…_")
         self._log("—", f"Round {self.idx + 1}: {r.name} ({r.type}, {r.duration_min} min)")
         self._set_state("Arjun is preparing the problem…")
@@ -395,7 +400,6 @@ class RoundBuilder(QWidget):
         self._start_listener()
         self.clock.start(); self._tick()
         self._speak(problem.get("intro", ""))
-        self._log("Arjun", problem.get("intro", ""))
         self.editor.setFocus()
 
     def end_round(self):
@@ -416,7 +420,7 @@ class RoundBuilder(QWidget):
         self.done_btn.setEnabled(False)
         last = self.idx == len(self.loop.rounds) - 1
         closing = "Thanks, that's time for this round." if not last else "Thanks, that wraps up the interview."
-        self._speak(closing); self._log("Arjun", closing)
+        self._speak(closing)
         self._set_state("Round finished. Scoring in the background.")
         self.evaluating += 1
 
@@ -541,19 +545,15 @@ class RoundBuilder(QWidget):
 
     # =========================================================== mic / speech
     def _start_listener(self):
-        from .stt import Listener
+        from .stt import LiveMic
         if self.listener:
             self.listener.stop()
-        tr = self.host.transcriber
 
-        def on_utt(audio):
-            def work():
-                text = tr.transcribe(audio)
-                if text:
-                    self.b.utterance.emit(text, soft.audio_stats(audio))
-            threading.Thread(target=work, daemon=True).start()
+        def on_text(text, audio):
+            self.b.utterance.emit(text, soft.audio_stats(audio))
 
-        self.listener = Listener(on_utt, silence_sec=self.patience.value())
+        self.listener = LiveMic(self.host.transcriber, on_text, on_partial=self.b.partial.emit,
+                                silence_sec=self.patience.value())
         self.listener.muted = not self.mic_on.isChecked()
         self.listener.start()
         self.level_timer.start()
@@ -564,13 +564,18 @@ class RoundBuilder(QWidget):
             self.listener = None
         self.level_timer.stop(); self.level.setValue(0)
 
-    def _speak(self, text: str):
+    def _speak(self, text: str, log: bool = True):
+        """Speak and (if log) show the line in the conversation the moment the voice starts."""
+        if not text:
+            return
         sp = self.host.speaker
-        if not text or not sp or not self.host.speak.isChecked():
+        if not sp or not self.host.speak.isChecked():
+            if log:
+                self._log("Arjun", text)
             return
         if self.listener and not self.headphones.isChecked():
             self.listener.muted = True  # don't transcribe our own voice from the speakers
-        sp.say(text)
+        sp.say(text, on_start=(lambda: self.b.main.emit(lambda: self._log("Arjun", text))) if log else None)
         self.tts_watch.start()
         self._set_state("Arjun is speaking…")
 
@@ -593,7 +598,12 @@ class RoundBuilder(QWidget):
         if self.listener:
             self.level.setValue(int(self.listener.level * 100))
             if self.listener.in_speech:
-                self._set_state("🎙 You're speaking…")
+                if not self._heard:
+                    self._set_state("🎙 You're speaking…")
+            elif self.listener.transcribing:
+                self._set_state("✎ Got it, writing down what you said…")
+            else:
+                self._heard = ""
 
     # =========================================================== interviewer brain
     def _current(self) -> L.LoopRound | None:
@@ -601,12 +611,18 @@ class RoundBuilder(QWidget):
             return self.loop.rounds[self.idx]
         return None
 
+    def _on_partial(self, text: str):
+        if self.listener and self.listener.busy:
+            self._heard = text
+            self._set_state("🎙 Heard: " + (text if len(text) <= 70 else "…" + text[-70:]))
+
     def _on_utterance(self, text: str, stats=None):
         r = self._current()
         if not r:
             return
         if stats:
             r.audio = soft.merge_audio_stats(r.audio, stats)
+        self._heard = ""
         r.log.append((time.time(), "You", text))
         self._log("You", text)
         self.last_activity = time.time()
@@ -629,6 +645,11 @@ class RoundBuilder(QWidget):
     def _request_reaction(self, event: str, images=()):
         r = self._current()
         if not r or self.paused:
+            return
+        if self.listener and (self.listener.in_speech or (event != "utterance" and self.listener.transcribing)):
+            # Still talking or being transcribed: react once everything you said is in.
+            if event != "silence":
+                self.pending_event = event
             return
         if self.reacting:
             # The candidate said/did more while we were thinking: discard that reply and rethink with everything.
@@ -659,11 +680,11 @@ class RoundBuilder(QWidget):
         r = self._current()
         if data.get("_error"):
             self.b.status.emit("Interviewer error: " + data["_error"].splitlines()[0])
-        if gen != self.react_gen or not r or (self.listener and self.listener.in_speech):
+        if gen != self.react_gen or not r or (self.listener and self.listener.busy):
             # Stale, or you started talking again: hear you out first, then react to everything.
             ev = self.pending_event or "utterance"
             self.pending_event = None
-            if r and not (self.listener and self.listener.in_speech):
+            if r and not (self.listener and self.listener.busy):
                 self._request_reaction(ev)
             elif r:
                 self.pending_event = ev
@@ -674,7 +695,6 @@ class RoundBuilder(QWidget):
             return
         if data.get("action") == "speak" and data.get("say"):
             r.log.append((time.time(), "Interviewer", data["say"]))
-            self._log("Arjun", data["say"])
             self._speak(data["say"])
             self.move_on_after_speech = bool(data.get("move_on"))
             if self.move_on_after_speech and not (self.host.speaker and self.host.speak.isChecked()):
@@ -692,14 +712,14 @@ class RoundBuilder(QWidget):
             self.remaining -= 1
         m, s = divmod(max(self.remaining, 0), 60)
         self.timer_lbl.setText(f"{m:02d}:{s:02d}")
-        color = "#c0392b" if self.remaining <= 60 else "#c98a1b" if self.remaining <= 300 else "#e6e6e6"
+        color = "#fb7185" if self.remaining <= 60 else "#fbbf24" if self.remaining <= 300 else "#e9ecf5"
         self.timer_lbl.setStyleSheet(f"color:{color}")
         if self.paused:
             return
         for mark, msg in ((300, "Just a heads up, about five minutes left."), (60, "One minute left, let's wrap up.")):
             if self.remaining == mark and mark not in self.warned and r.duration_min * 60 > mark * 2:
                 self.warned.add(mark)
-                r.log.append((time.time(), "Interviewer", msg)); self._log("Arjun", msg); self._speak(msg)
+                r.log.append((time.time(), "Interviewer", msg)); self._speak(msg)
         if self.remaining <= 0:
             self.end_round()
             return
@@ -711,8 +731,15 @@ class RoundBuilder(QWidget):
             shot = cam.snapshot()
             if shot:
                 r.camera_shots = (r.camera_shots + [str(shot)])[-3:]
+        if self.listener and self.listener.busy:
+            self.last_activity = now  # talking or still being transcribed is never silence
+            return
         busy = self.reacting or speaking or (self.host.speaker and self.host.speaker.busy)
         if busy:
+            return
+        if self.pending_event:
+            ev, self.pending_event = self.pending_event, None
+            self._request_reaction(ev)
             return
         code = self.editor.toPlainText()
         if (code != self.code_seen and now - self.last_edit >= self.CODE_IDLE_SEC
@@ -740,7 +767,7 @@ class RoundBuilder(QWidget):
         self.state_lbl.setText(text)
 
     def _log(self, who: str, text: str):
-        color = "#7fb2ff" if who == "Arjun" else "#7ee0a8" if who.startswith("You") else "#9aa0ac"
+        color = "#a78bfa" if who == "Arjun" else "#5eead4" if who.startswith("You") else "#8b93ab"
         self.conv_view.append(f'<p style="margin:6px 0"><span style="color:{color};font-weight:600">'
                               f'{html.escape(who)}</span>&nbsp; {html.escape(text)}</p>')
         sb = self.conv_view.verticalScrollBar(); sb.setValue(sb.maximum())

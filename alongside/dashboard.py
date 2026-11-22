@@ -19,8 +19,8 @@ from .interview import ROLES
 from .knowledge import DIFFICULTIES, TIER_NAMES
 from .soft import SOFT_HELP, SOFT_SKILLS
 
-BG, PANEL, GRID, TEXT, MUTED = "#14161b", "#1d2027", "#2c313b", "#e6e6e6", "#9aa0ac"
-ACCENT = "#2f6fed"
+BG, PANEL, GRID, TEXT, MUTED = "#0d0f16", "#161a26", "#252b3d", "#e9ecf5", "#8b93ab"
+ACCENT = "#8b5cf6"
 
 
 def _font(size: int, weight=QFont.Normal) -> QFont:
@@ -32,12 +32,12 @@ def _font(size: int, weight=QFont.Normal) -> QFont:
 
 def score_color(v: float | None) -> str:
     if v is None:
-        return "#3a404d"
+        return "#333b55"
     if v >= 7.5:
-        return "#1f9d63"
+        return "#34d399"
     if v >= 6:
-        return "#c98a1b"
-    return "#c0392b"
+        return "#fbbf24"
+    return "#fb7185"
 
 
 def _style_chart(chart: QChart, title: str) -> None:
@@ -221,7 +221,7 @@ class Dashboard(QWidget):
             self.t_avg.set(f"{s['recent_avg']:.1f}/10", delta, score_color(s["recent_avg"]))
         else:
             self.t_avg.set("–", "no answers yet")
-        ready_color = {"Ready": "#1f9d63", "Close": "#c98a1b", "Needs work": "#c0392b"}.get(s["readiness"], MUTED)
+        ready_color = {"Ready": "#34d399", "Close": "#fbbf24", "Needs work": "#fb7185"}.get(s["readiness"], MUTED)
         self.t_ready.set(s["readiness"], "≥7.5 Ready · 6–7.5 Close", ready_color)
 
         role = f.role or "Software Developer"
@@ -276,7 +276,7 @@ class Dashboard(QWidget):
         series = QHorizontalStackedBarSeries()
         series.setBarWidth(0.65)
         # One set per colour band so bars are coloured by score.
-        bands = [("#c0392b", lambda v: v < 6), ("#c98a1b", lambda v: 6 <= v < 7.5), ("#1f9d63", lambda v: v >= 7.5)]
+        bands = [("#fb7185", lambda v: v < 6), ("#fbbf24", lambda v: 6 <= v < 7.5), ("#34d399", lambda v: v >= 7.5)]
         for color, test in bands:
             bs = QBarSet("")
             bs.setColor(QColor(color)); bs.setBorderColor(QColor(color))
@@ -336,19 +336,19 @@ class Dashboard(QWidget):
         wpm = s["wpm"]
         if wpm:
             ok = 125 <= wpm <= 170
-            self.s_pace.set(f"{wpm:.0f} wpm", "ideal 130-160", "#1f9d63" if ok else "#c98a1b")
+            self.s_pace.set(f"{wpm:.0f} wpm", "ideal 130-160", "#34d399" if ok else "#fbbf24")
         else:
             self.s_pace.set("–", "speak your answers to measure")
         fr = s["filler_rate"]
         if fr is not None:
-            self.s_fill.set(f"{fr:.1f}/100 words", "aim below 3", "#1f9d63" if fr < 3 else "#c98a1b" if fr < 6
-                            else "#c0392b")
+            self.s_fill.set(f"{fr:.1f}/100 words", "aim below 3", "#34d399" if fr < 3 else "#fbbf24" if fr < 6
+                            else "#fb7185")
         else:
             self.s_fill.set("–", "speak your answers to measure")
         ec = s["eye_contact"]
         if ec is not None:
             self.s_eye.set(f"{ec:.0f}%", f"in frame {s['presence']:.0f}% · fidget {s['fidget']}",
-                           "#1f9d63" if ec >= 70 else "#c98a1b" if ec >= 50 else "#c0392b")
+                           "#34d399" if ec >= 70 else "#fbbf24" if ec >= 50 else "#fb7185")
         else:
             self.s_eye.set("–", "turn the camera on")
 
@@ -357,8 +357,8 @@ class Dashboard(QWidget):
         _style_chart(chart, "Soft-skill dimensions (weakest at top)")
         dims = sorted(((k, v) for k, v in s["dims"].items() if k in SOFT_SKILLS), key=lambda kv: -kv[1])
         series = QHorizontalStackedBarSeries(); series.setBarWidth(0.65)
-        for color, test in (("#c0392b", lambda v: v < 6), ("#c98a1b", lambda v: 6 <= v < 7.5),
-                            ("#1f9d63", lambda v: v >= 7.5)):
+        for color, test in (("#fb7185", lambda v: v < 6), ("#fbbf24", lambda v: 6 <= v < 7.5),
+                            ("#34d399", lambda v: v >= 7.5)):
             bs = QBarSet(""); bs.setColor(QColor(color)); bs.setBorderColor(QColor(color))
             for _, v in dims:
                 bs.append(v if test(v) else 0)

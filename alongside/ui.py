@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import screen
-from .config import SESSIONS_DIR, Settings
+from .config import ROOT, SESSIONS_DIR, Settings
 from .dashboard import Dashboard
 from .interview import (CODE_SEGMENTS, DIFFICULTIES, DURATIONS, ROLES, ROUNDS, SEGMENTS, Profile, Session, Turn,
                         improvement_plan)
@@ -30,35 +30,105 @@ from PySide6.QtGui import QImage, QPixmap
 from .tts import VOICES, voice_key
 
 STYLE = """
-QMainWindow, QWidget#root { background: #14161b; color: #e6e6e6; }
-QLabel, QCheckBox { color: #c9ccd3; }
-QPushButton#primary:disabled, QPushButton#mic:disabled { background: #2a2f3a; border-color: #3a404d; }
-QTextBrowser, QPlainTextEdit, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QListWidget {
-  background: #1d2027; color: #e6e6e6; border: 1px solid #2c313b; border-radius: 6px; padding: 6px; }
-QPushButton { background: #2a2f3a; color: #e6e6e6; border: 1px solid #3a404d; border-radius: 6px; padding: 7px 12px; }
-QPushButton:hover { background: #343a47; }
-QPushButton:disabled { color: #6b7080; }
-QPushButton#primary { background: #2f6fed; border-color: #2f6fed; font-weight: 600; }
-QPushButton#mic { background: #1f7a4d; border-color: #1f7a4d; font-weight: 600; min-height: 34px; }
-QPushButton#mic[rec="true"] { background: #c0392b; border-color: #c0392b; }
-QPushButton#danger { background: #8e2a20; border-color: #c0392b; font-weight: 600; }
-QPushButton#danger:hover { background: #a93226; }
-QPushButton#danger:disabled { background: #2a2f3a; border-color: #3a404d; }
-QScrollArea, QScrollArea > QWidget > QWidget { background: #14161b; }
-QTableWidget { background: #1d2027; color: #e6e6e6; }
-QHeaderView::section { background: #1d2027; color: #9aa0ac; border: none; padding: 4px; }
-QTableCornerButton::section { background: #1d2027; border: none; }
-QScrollBar:vertical { background: #14161b; width: 10px; margin: 0; }
-QScrollBar::handle:vertical { background: #3a404d; border-radius: 4px; min-height: 30px; }
+/* ---- AlongSide theme: deep slate, violet → cyan accent, soft cards ---- */
+QMainWindow, QWidget#root { background: #0d0f16; color: #e9ecf5; }
+QWidget { selection-background-color: #5b3fd1; selection-color: #ffffff; }
+QLabel, QCheckBox, QRadioButton { color: #c3c8da; background: transparent; }
+QLabel#paneTitle { color: #e9ecf5; font-weight: 600; }
+QLabel#heard { background: #12202a; color: #8fe9dc; border: 1px solid #1d3b44; border-radius: 10px; padding: 6px 10px; }
+QLabel#brand { padding: 0 18px 0 14px; }
+QWidget#card, QFrame#card { background: #131723; border: 1px solid #222840; border-radius: 14px; }
+QToolTip { background: #1e2333; color: #e9ecf5; border: 1px solid #3b3f6e; border-radius: 6px; padding: 6px 8px; }
+
+/* inputs */
+QTextBrowser, QPlainTextEdit, QTextEdit, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QListWidget, QTreeWidget {
+  background: #161a26; color: #e9ecf5; border: 1px solid #252b3d; border-radius: 10px; padding: 7px; }
+QPlainTextEdit#codeEditor { background: #12141b; border-radius: 10px; padding: 4px; }
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QPlainTextEdit:focus, QTextEdit:focus {
+  border: 1px solid #8b5cf6; }
+QLineEdit:hover, QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover { border-color: #3b4466; }
+QComboBox { padding-right: 24px; }
+QComboBox::drop-down { border: none; width: 22px; }
+QComboBox::down-arrow { image: url(__ASSETS__/chevron.svg); width: 12px; height: 12px; margin-right: 8px; }
+QComboBox QAbstractItemView { background: #161a26; color: #e9ecf5; border: 1px solid #333b55; border-radius: 8px;
+  padding: 4px; selection-background-color: #2b2257; outline: 0; }
+QSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::up-button, QDoubleSpinBox::down-button { width: 0; border: none; }
+QListWidget::item { padding: 8px 10px; border-radius: 8px; margin: 1px 2px; }
+QListWidget::item:hover { background: #1c2133; }
+QListWidget::item:selected { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #2d2160, stop:1 #143845);
+  color: #ffffff; }
+QCheckBox::indicator { width: 16px; height: 16px; border-radius: 5px; border: 1px solid #3b4466; background: #161a26; }
+QCheckBox::indicator:hover { border-color: #8b5cf6; }
+QCheckBox::indicator:checked { background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #8b5cf6, stop:1 #06b6d4);
+  border-color: #8b5cf6; }
+
+/* buttons */
+QPushButton { background: #1e2333; color: #e9ecf5; border: 1px solid #2f3650; border-radius: 10px; padding: 8px 14px; }
+QPushButton:hover { background: #262c42; border-color: #4a4f86; }
+QPushButton:pressed { background: #1a1e2d; }
+QPushButton:checked { background: #2b2257; border-color: #8b5cf6; }
+QPushButton:disabled { color: #5d6580; background: #161a26; border-color: #222840; }
+QPushButton#primary { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #7c3aed, stop:1 #0891b2);
+  border: none; color: #ffffff; font-weight: 700; padding: 9px 16px; }
+QPushButton#primary:hover { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #8b5cf6, stop:1 #06b6d4); }
+QPushButton#primary:disabled, QPushButton#mic:disabled { background: #1e2333; color: #5d6580; border: 1px solid #2f3650; }
+QPushButton#mic { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #059669, stop:1 #0d9488);
+  border: none; color: #ffffff; font-weight: 700; min-height: 34px; }
+QPushButton#mic:hover { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #10b981, stop:1 #14b8a6); }
+QPushButton#mic[rec="true"] { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #e11d48, stop:1 #db2777); }
+QPushButton#danger { background: #3a1422; color: #fda4af; border: 1px solid #7f1d3a; font-weight: 700; }
+QPushButton#danger:hover { background: #be123c; color: #ffffff; }
+QPushButton#danger:disabled { background: #161a26; color: #5d6580; border-color: #222840; }
+
+/* tables */
+QTableWidget, QTableView { background: #131723; color: #e9ecf5; gridline-color: #1e2333; border: 1px solid #222840;
+  border-radius: 10px; }
+QTableWidget::item:selected { background: #2b2257; }
+QHeaderView::section { background: #131723; color: #8b93ab; border: none; border-bottom: 1px solid #222840;
+  padding: 6px; font-weight: 600; }
+QTableCornerButton::section { background: #131723; border: none; }
+
+/* scrolling, splitters */
+QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; }
+QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }
+QScrollBar::handle:vertical { background: #2a3148; border-radius: 4px; min-height: 30px; }
+QScrollBar::handle:vertical:hover { background: #4a4f86; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-QScrollBar:horizontal { background: #14161b; height: 10px; margin: 0; }
-QScrollBar::handle:horizontal { background: #3a404d; border-radius: 4px; min-width: 30px; }
+QScrollBar:horizontal { background: transparent; height: 10px; margin: 2px; }
+QScrollBar::handle:horizontal { background: #2a3148; border-radius: 4px; min-width: 30px; }
+QScrollBar::handle:horizontal:hover { background: #4a4f86; }
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
-QTabWidget::pane { border: 1px solid #2c313b; border-radius: 6px; }
-QTabBar::tab { background: #1d2027; color: #c9ccd3; padding: 7px 14px; }
-QTabBar::tab:selected { background: #2a2f3a; color: white; }
-QProgressBar { background: #1d2027; border: 1px solid #2c313b; border-radius: 4px; height: 8px; }
-QProgressBar::chunk { background: #1f9d63; }
+QScrollBar::add-page, QScrollBar::sub-page { background: none; }
+QSplitter::handle { background: transparent; }
+QSplitter::handle:hover { background: #2b2257; }
+QSplitter::handle:horizontal { width: 8px; }
+QSplitter::handle:vertical { height: 8px; }
+
+/* tabs: inner tabs as underlined text, main navigation as pills */
+QTabWidget::pane { border: 1px solid #222840; border-radius: 12px; top: -1px; background: #0f121b; }
+QTabBar::tab { background: transparent; color: #8b93ab; padding: 8px 14px; border: none;
+  border-bottom: 2px solid transparent; }
+QTabBar::tab:hover { color: #e9ecf5; }
+QTabBar::tab:selected { color: #ffffff; border-bottom: 2px solid #8b5cf6; }
+QTabWidget#mainTabs::pane { border: none; background: #0d0f16; }
+QTabWidget#mainTabs > QTabBar { background: #0a0c12; qproperty-drawBase: 0; border: none; }
+QTabWidget#mainTabs QLabel#brand { background: #0a0c12; }
+QTabWidget#mainTabs > QTabBar::tab { color: #8b93ab; padding: 9px 18px; margin: 8px 4px; border-radius: 18px;
+  border: 1px solid transparent; font-weight: 600; }
+QTabWidget#mainTabs > QTabBar::tab:hover { background: #161a26; color: #e9ecf5; }
+QTabWidget#mainTabs > QTabBar::tab:selected { color: #ffffff; border: 1px solid #4c3a9e;
+  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #2d2160, stop:1 #12394a); }
+
+/* progress, status bar, menus */
+QProgressBar { background: #161a26; border: none; border-radius: 4px; height: 8px; }
+QProgressBar::chunk { border-radius: 4px; background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #10b981, stop:1 #22d3ee); }
+QStatusBar { background: #0a0c12; color: #8b93ab; border-top: 1px solid #161a26; }
+QStatusBar::item { border: none; }
+QMenu { background: #161a26; color: #e9ecf5; border: 1px solid #333b55; border-radius: 8px; padding: 4px; }
+QMenu::item { padding: 6px 14px; border-radius: 6px; }
+QMenu::item:selected { background: #2b2257; }
+QMessageBox, QDialog { background: #131723; }
+QFormLayout QLabel { color: #8b93ab; }
 """
 
 
@@ -80,6 +150,7 @@ class Bridge(QObject):
     hint_ready = Signal(str)
     agenda = Signal(object)
     resume_done = Signal(object)
+    screen_note = Signal(str)
 
 
 def run_bg(bridge: Bridge, fn, *args, busy: bool = True):
@@ -110,8 +181,14 @@ class MainWindow(QMainWindow):
         self.recorder = None
         self._pending = 0
 
-        self.main_tabs = QTabWidget()
+        self.main_tabs = QTabWidget(objectName="mainTabs")
         self.main_tabs.setDocumentMode(True)
+        brand = QLabel("<span style='font-size:17px;font-weight:800;color:#a78bfa'>Along</span>"
+                       "<span style='font-size:17px;font-weight:800;color:#22d3ee'>Side</span>"
+                       "<span style='color:#5d6580'>&nbsp;&nbsp;·&nbsp;&nbsp;interview gym</span>", objectName="brand")
+        brand.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+        brand.setMinimumHeight(54)
+        self.main_tabs.setCornerWidget(brand, Qt.TopLeftCorner)
         self.setCentralWidget(self.main_tabs)
         root = QWidget(objectName="root")
         lay = QHBoxLayout(root)
@@ -122,20 +199,20 @@ class MainWindow(QMainWindow):
         split = QSplitter()
         sp_lay.addWidget(split)
         self.iv_stack.addWidget(setup_page)
-        self.main_tabs.addTab(root, "Interview")
+        self.main_tabs.addTab(root, "🎯  Interview")
         from .reports import PastInterviews
         self.interviews = PastInterviews()
         self.interviews.setObjectName("root")
-        self.main_tabs.addTab(self.interviews, "Past Interviews")
+        self.main_tabs.addTab(self.interviews, "🗂  Past Interviews")
         self.interviews.changed.connect(lambda: self.dashboard.refresh())
         self.interviews.model_getter = lambda: self.model.currentText()
         from .builder import RoundBuilder
         self.builder = RoundBuilder(self)
         self.builder.setObjectName("root")
-        self.main_tabs.addTab(self.builder, "Round Builder")
+        self.main_tabs.addTab(self.builder, "🏢  Round Builder")
         self.dashboard = Dashboard()
         self.dashboard.setObjectName("root")
-        self.main_tabs.addTab(self.dashboard, "Dashboard")
+        self.main_tabs.addTab(self.dashboard, "📈  Dashboard")
         self.main_tabs.currentChanged.connect(lambda i: self.main_tabs.widget(i) is self.dashboard and self.dashboard.refresh())
         self.dashboard.plan_requested.connect(self.generate_plan)
         self.dashboard.practice_requested.connect(self.practice_area)
@@ -157,7 +234,7 @@ class MainWindow(QMainWindow):
         self.level_bar.setFixedWidth(140)
         self.statusBar().addPermanentWidget(QLabel("Mic"))
         self.statusBar().addPermanentWidget(self.level_bar)
-        self.statusBar().setStyleSheet("color:#9aa0ac")
+        self.statusBar().setStyleSheet("color:#8b93ab")
         self._level_timer = QTimer(self, interval=100, timeout=self._update_level)
         self.camera = None
         self._cam_timer = QTimer(self, interval=150, timeout=self._update_camera)
@@ -180,6 +257,7 @@ class MainWindow(QMainWindow):
         b.saved.connect(self._on_saved)
         b.hint_ready.connect(self._on_hint)
         b.resume_done.connect(self._on_resume_done)
+        b.screen_note.connect(self._on_screen_note)
         self._clock = QTimer(self, interval=1000, timeout=self._tick)
 
         QShortcut(QKeySequence("Ctrl+Space"), self, activated=self.toggle_mic)
@@ -197,10 +275,10 @@ class MainWindow(QMainWindow):
     def _build_setup(self) -> QWidget:
         w = QWidget()
         v = QVBoxLayout(w)
-        title = QLabel("AlongSide")
-        f = QFont(); f.setPointSize(20); f.setBold(True); title.setFont(f)
+        title = QLabel("<span style='font-size:22px;font-weight:800;color:#e9ecf5'>New interview</span><br>"
+                       "<span style='color:#8b93ab'>Set it up, then Arjun takes it from here.</span>")
         v.addWidget(title)
-        v.addWidget(QLabel("Mock interview practice"))
+        v.addSpacing(4)
 
         prow = QHBoxLayout()
         self.profile_box = QComboBox()
@@ -244,7 +322,7 @@ class MainWindow(QMainWindow):
         rrow = QHBoxLayout()
         rrow.addWidget(QLabel("Resume"))
         self.resume_status = QLabel("")
-        self.resume_status.setStyleSheet("color:#9aa0ac; font-size:11px")
+        self.resume_status.setStyleSheet("color:#8b93ab; font-size:11px")
         upload = QPushButton("Upload resume…")
         upload.clicked.connect(self._upload_resume)
         self.resume_view_btn = QPushButton("Analysis")
@@ -311,7 +389,7 @@ class MainWindow(QMainWindow):
         self.clock_lbl = QLabel("")
         f = QFont(); f.setPointSize(18); f.setBold(True); self.clock_lbl.setFont(f)
         self.live_state = QLabel("")
-        self.live_state.setStyleSheet("color:#9aa0ac; font-weight:600")
+        self.live_state.setStyleSheet("color:#8b93ab; font-weight:600")
         self.end_top_btn = QPushButton("■  End interview", objectName="danger")
         self.end_top_btn.setToolTip("Stop now and get the scored report")
         self.end_top_btn.clicked.connect(self._confirm_end)
@@ -328,8 +406,8 @@ class MainWindow(QMainWindow):
         self.q_card.setTextFormat(Qt.RichText)
         self.q_card.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self.q_card.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.q_card.setStyleSheet("background:#1d2027; border:1px solid #2f6fed; border-radius:8px; padding:14px;"
-                                  "font-size:16px; color:#e6e6e6")
+        self.q_card.setStyleSheet("background:#161a26; border:1px solid #8b5cf6; border-radius:8px; padding:14px;"
+                                  "font-size:16px; color:#e9ecf5")
         q_scroll = QScrollArea(widgetResizable=True)
         q_scroll.setFrameShape(QFrame.NoFrame)
         q_scroll.setWidget(self.q_card)
@@ -337,29 +415,29 @@ class MainWindow(QMainWindow):
         left.addWidget(q_scroll); left.addWidget(self.chat_view)
         left.setSizes([260, 420])
 
-        # ---- right: writing space, both always visible
-        right = QWidget()
-        rv = QVBoxLayout(right); rv.setContentsMargins(0, 0, 0, 0)
-        self.write_split = QSplitter(Qt.Vertical)
-        ans_box = QWidget(); av = QVBoxLayout(ans_box); av.setContentsMargins(0, 0, 0, 0)
-        av.addWidget(QLabel("Your answer: live transcript of what you say (you can also type or edit)"))
-        self.answer = QPlainTextEdit()
-        self.answer.setPlaceholderText("Just talk. Your words appear here. Ctrl+Enter: submit   Ctrl+H: hint   "
-                                       "Ctrl+Space: mute/unmute   Ctrl+Shift+S: review my screen")
-        av.addWidget(self.answer)
-        pad_box = QWidget(); pv = QVBoxLayout(pad_box); pv.setContentsMargins(0, 0, 0, 0)
-        pv.addWidget(QLabel("Code / design pad: Arjun reads everything you write here"))
-        self.pad = QPlainTextEdit()
-        from PySide6.QtGui import QFontDatabase
-        mono = QFontDatabase.systemFont(QFontDatabase.FixedFont); mono.setPointSize(12)
-        self.pad.setFont(mono)
-        self.pad.setTabStopDistance(4 * self.pad.fontMetrics().horizontalAdvance(" "))
-        self.pad.setPlaceholderText("Write code for coding rounds. For system design, outline components, APIs, "
-                                    "schema and numbers (or draw in a whiteboard app and press 'Review my screen').")
-        pv.addWidget(self.pad)
-        self.write_split.addWidget(ans_box); self.write_split.addWidget(pad_box)
-        self.write_split.setSizes([300, 300])
-        rv.addWidget(self.write_split, 1)
+        # ---- right: ONE big workspace for notes, code and design (Arjun reads all of it)
+        from .editor import Workspace
+        right = QWidget(objectName="card")
+        rv = QVBoxLayout(right); rv.setContentsMargins(12, 10, 12, 12)
+        self.workspace = Workspace("Workspace · Arjun reads everything you write here")
+        self.workspace.code_lang = self.settings.code_language
+        self.workspace.language_changed.connect(self._on_ws_language)
+        self.pad = self.workspace.editor
+        self.pad.setPlaceholderText(
+            "Just talk. Your spoken answer is captured automatically (see 'Heard' above and the chat).\n\n"
+            "Write here whenever it helps:\n"
+            "  • code: pick the language above (Java, Python, C++…). Auto-indent and colouring are on\n"
+            "  • system design: notes, components, APIs, schema, numbers, plus { } Code block for snippets\n\n"
+            "Ctrl+Enter submit · Ctrl+H hint · Ctrl+Space mute · Ctrl+Shift+S review my screen")
+        # Spoken transcript buffer (not a separate box any more; shown compactly as 'Heard').
+        self.answer = QPlainTextEdit(); self.answer.hide()
+        self.heard_lbl = QLabel("")
+        self.heard_lbl.setObjectName("heard")
+        self.heard_lbl.setWordWrap(True)
+        self.heard_lbl.setMaximumHeight(46)
+        self.heard_lbl.setToolTip("What Arjun has heard you say on this question (speech-to-text)")
+        rv.addWidget(self.heard_lbl)
+        rv.addWidget(self.workspace, 1)
         self.live_fb_view = QTextBrowser(openExternalLinks=True)
         self.live_fb_view.setVisible(False)
 
@@ -370,7 +448,13 @@ class MainWindow(QMainWindow):
 
         self._answer_cache = self._pad_cache = self._pad_snapshot = ""
         self.live = None
-        self.answer.textChanged.connect(lambda: setattr(self, "_answer_cache", self.answer.toPlainText().strip()))
+        def _answer_changed():
+            self._answer_cache = self.answer.toPlainText().strip()
+            t = self._answer_cache
+            self.heard_lbl.setText(("🎙 Heard: " + (t if len(t) <= 220 else "…" + t[-220:])) if t else "")
+            self.heard_lbl.setVisible(bool(t))
+        self.answer.textChanged.connect(_answer_changed)
+        _answer_changed()
 
         def _pad_changed():
             self._pad_cache = self.pad.toPlainText()
@@ -384,8 +468,8 @@ class MainWindow(QMainWindow):
         self.live_cam_view.setFixedSize(128, 96)
         self.live_cam_view.setScaledContents(True)
         self.live_cam_view.setAlignment(Qt.AlignCenter)
-        self.live_cam_view.setStyleSheet("background:#1d2027; border:1px solid #2c313b; border-radius:6px; "
-                                         "color:#6b7080; font-size:10px")
+        self.live_cam_view.setStyleSheet("background:#161a26; border:1px solid #252b3d; border-radius:6px; "
+                                         "color:#5d6580; font-size:10px")
         bar.addWidget(self.live_cam_view)
         col = QVBoxLayout()
         r1 = QHBoxLayout()
@@ -428,11 +512,15 @@ class MainWindow(QMainWindow):
         self._live_main.setSizes([int(total * 0.3), int(total * 0.45), int(total * 0.25)] if on
                                  else [int(total * 0.4), int(total * 0.6), 0])
 
-    def _focus_pad(self, coding: bool):
-        total = sum(self.write_split.sizes()) or 600
-        self.write_split.setSizes([int(total * 0.25), int(total * 0.75)] if coding else [int(total * 0.6),
-                                                                                         int(total * 0.4)])
-        (self.pad if coding else self.answer).setFocus()
+    def _focus_pad(self, segment: str):
+        # Coding / machine coding: colour and indent as code. Theory and system design: notes with code blocks.
+        self.workspace.set_language(self.workspace.code_lang if segment in ("coding", "machine_coding") else "Notes")
+        self.pad.setFocus()
+
+    def _on_ws_language(self, name: str):
+        if name != "Notes" and name != self.settings.code_language:
+            self.settings.code_language = name
+            self.settings.save()
 
     def _build_side(self) -> QWidget:
         self.tabs = QTabWidget()
@@ -448,9 +536,9 @@ class MainWindow(QMainWindow):
         self.cam_view = QLabel("Camera off")
         self.cam_view.setFixedSize(240, 180)
         self.cam_view.setAlignment(Qt.AlignCenter)
-        self.cam_view.setStyleSheet("background:#1d2027; border:1px solid #2c313b; border-radius:6px; color:#6b7080")
+        self.cam_view.setStyleSheet("background:#161a26; border:1px solid #252b3d; border-radius:6px; color:#5d6580")
         self.cam_stats = QLabel("")
-        self.cam_stats.setStyleSheet("color:#9aa0ac; font-size:11px")
+        self.cam_stats.setStyleSheet("color:#8b93ab; font-size:11px")
         ch = QHBoxLayout(); ch.addWidget(self.cam_view); ch.addWidget(self.cam_stats, 1)
         sv.addLayout(ch)
         sv.addWidget(self.tabs, 1)
@@ -654,22 +742,31 @@ class MainWindow(QMainWindow):
         if not self.session or self.session.aborted or turn not in self.session.turns:
             return
         tag = {"followup": "Follow-up", "wrap": "Interviewer"}.get(turn.kind, f"Q{self.session.main_questions_asked}")
-        self._append_chat(f"Arjun · {tag}" + (f" · {turn.topic}" if turn.topic else ""), turn.question)
-        if self.live:
-            self.live.new_question(turn.question)
-        elif self.speaker and self.speak.isChecked():
-            self.speaker.say(turn.question)
-        self.answer.clear()
-        self._turn_start, self._turn_audio = time.time(), {}
-        if turn.segment in CODE_SEGMENTS and turn.kind == "question" and self.pad.toPlainText().strip():
-            self.pad.clear()  # new problem: fresh pad (previous code is saved with its answer)
-        self._focus_pad(turn.segment in CODE_SEGMENTS)
         seg_name = SEGMENTS.get(turn.segment, "").split(" (")[0]
         meta = " · ".join(x for x in (tag, seg_name, turn.topic) if x)
-        hint = ("<br><span style='color:#9aa0ac;font-size:13px'>Write your solution in the pad on the right and talk "
+        meta_html = f"<span style='color:#a78bfa;font-size:12px;font-weight:600'>{html.escape(meta)}</span>"
+        hint = ("<br><span style='color:#8b93ab;font-size:13px'>Write your solution in the pad on the right and talk "
                 "through it.</span>" if turn.segment in CODE_SEGMENTS else "")
-        self.q_card.setText(f"<span style='color:#7fb2ff;font-size:12px;font-weight:600'>{html.escape(meta)}</span>"
-                            f"<br><br>{html.escape(turn.question)}{hint}")
+
+        def reveal():
+            # Shown the moment Arjun's voice starts, so text and speech stay in sync.
+            if not self.session or self.session.current is not turn:
+                return
+            self._append_chat(f"Arjun · {tag}" + (f" · {turn.topic}" if turn.topic else ""), turn.question)
+            self.q_card.setText(f"{meta_html}<br><br>{html.escape(turn.question)}{hint}")
+
+        if self.live and turn.kind != "wrap":
+            self.q_card.setText(f"{meta_html}<br><br><span style='color:#8b93ab'>Arjun is asking…</span>")
+            self.live.new_question(turn.question, on_start=reveal)
+        else:
+            reveal()
+            if self.speaker and self.speak.isChecked():
+                self.speaker.say(turn.question)
+        self.answer.clear()
+        self._turn_start, self._turn_audio = time.time(), {}
+        if turn.kind == "question" and self.pad.toPlainText().strip():
+            self.pad.clear()  # new question: fresh workspace (what you wrote is saved with its answer)
+        self._focus_pad(turn.segment)
         self._pad_snapshot = self.pad.toPlainText()
         self._draw_agenda()
         if turn.kind == "wrap":
@@ -686,6 +783,13 @@ class MainWindow(QMainWindow):
         if not self.live and self.recorder and self.recorder.recording:
             self.toggle_mic(then_submit=True)
             return
+        if self.live and self.live.mic_busy and getattr(self, "_submit_wait", 0) < 75:
+            # Your last words are still being written down: wait (up to ~15 s) so they're part of the answer.
+            self._submit_wait = getattr(self, "_submit_wait", 0) + 1
+            self.live_state.setText("●  Finishing writing down your answer…")
+            QTimer.singleShot(200, self.submit_answer)
+            return
+        self._submit_wait = 0
         turn = self.session.current
         turn.answer = _strip_done(self.answer.toPlainText().strip())
         turn.code = self._pad_for(turn)
@@ -697,11 +801,11 @@ class MainWindow(QMainWindow):
             turn.camera = self.camera.stats(getattr(self, "_turn_start", time.time() - 120))
         if self.live:
             self.live.hold()
-            self._append_chat("You · final answer", "(submitted)" if turn.answer else "(answered in the pad)")
+            self._append_chat("You · final answer", "(submitted)" if turn.answer else "(answered in the workspace)")
         else:
             if self.speaker:
                 self.speaker.stop()
-            self._append_chat("You", turn.answer or "(answered on screen)")
+            self._append_chat("You · final answer", "(submitted)" if turn.answer else "(answered in the workspace)")
         self.answer.clear()
         # Evaluate and fetch the next question in parallel to cut waiting time.
         run_bg(self.b, self._evaluate, turn)
@@ -769,9 +873,7 @@ class MainWindow(QMainWindow):
         self.b.status.emit("Arjun is looking at your screen…")
         self.b.stream.emit("\x00Screen review")
         note = self.session.review_screen(turn, shot, on_text=self.b.stream.emit)
-        self.b.chat.emit("Arjun · watching your screen", note)
-        if self.speaker and self.speak.isChecked():
-            self.speaker.say(note)
+        self.b.screen_note.emit(note)
 
     def abort_interview(self):
         """Ended early: stop everything and throw the interview away (no scoring, saving or analysis)."""
@@ -848,11 +950,11 @@ class MainWindow(QMainWindow):
         for i, seg in enumerate(s.agenda):
             name = seg["title"].split(" (")[0]
             if i < cur:
-                parts.append(f'<span style="color:#6b7080">✓ {name} {seg["minutes"]}m</span>')
+                parts.append(f'<span style="color:#5d6580">✓ {name} {seg["minutes"]}m</span>')
             elif i == cur:
-                parts.append(f'<span style="color:#7fb2ff;font-weight:600">▶ {name} {seg["minutes"]}m</span>')
+                parts.append(f'<span style="color:#a78bfa;font-weight:600">▶ {name} {seg["minutes"]}m</span>')
             else:
-                parts.append(f'<span style="color:#9aa0ac">{name} {seg["minutes"]}m</span>')
+                parts.append(f'<span style="color:#8b93ab">{name} {seg["minutes"]}m</span>')
         self.agenda_lbl.setText("  ·  ".join(parts))
 
     def _tick(self):
@@ -863,7 +965,7 @@ class MainWindow(QMainWindow):
         m, sec = divmod(max(0, int(rem)), 60)
         h, m = divmod(m, 60)
         self.clock_lbl.setText(f"{h}:{m:02d}:{sec:02d}" if h else f"{m:02d}:{sec:02d}")
-        self.clock_lbl.setStyleSheet(f"color:{'#c0392b' if rem <= 120 else '#c98a1b' if rem <= 300 else '#e6e6e6'}")
+        self.clock_lbl.setStyleSheet(f"color:{'#fb7185' if rem <= 120 else '#fbbf24' if rem <= 300 else '#e9ecf5'}")
         if int(s.elapsed()) % 15 == 0:
             self._draw_agenda()
         if rem <= 0 and not self._time_up:
@@ -932,11 +1034,12 @@ class MainWindow(QMainWindow):
         if text:
             cur = self.answer.toPlainText().strip()
             self.answer.setPlainText((cur + " " + text).strip())
+            self._append_chat("You", text)
         self.b.status.emit("Got it. Edit if needed, then Ctrl+Enter to submit." if text else "Didn't catch that.")
 
     # ------------------------------------------------------------------ rendering
     def _append_chat(self, who: str, text: str):
-        color = "#7fb2ff" if who.startswith("Arjun") else "#7ee0a8" if who == "You" else "#f5c26b"
+        color = "#a78bfa" if who.startswith("Arjun") else "#5eead4" if who == "You" else "#fbbf24"
         self.chat_view.append(
             f'<p style="margin:10px 0 2px 0;color:{color};font-weight:600">{html.escape(who)}</p>'
             f'<p style="margin:0 0 8px 0;line-height:140%">{html.escape(text).replace(chr(10), "<br>")}</p>'
@@ -1024,6 +1127,7 @@ class MainWindow(QMainWindow):
         self.live.interviewer.connect(self._live_interviewer)
         self.live.next_requested.connect(lambda _reason: self.submit_answer())
         self.live.state.connect(self._live_state)
+        self.live.partial.connect(self._live_partial)
         self.live.start()
         self._level_timer.start()
         self._set_mic_ui_live()
@@ -1065,16 +1169,31 @@ class MainWindow(QMainWindow):
         if turn:
             turn.exchanges.append(["Interviewer", text, kind])
         label = {"hint": "Arjun · hint", "ack": "Arjun", "nudge": "Arjun · nudge", "time": "Arjun · time",
-                 "pushback": "Arjun", "clarify": "Arjun · clarifies"}.get(kind, "Arjun")
+                 "pushback": "Arjun", "clarify": "Arjun · clarifies",
+                 "screen": "Arjun · watching your screen"}.get(kind, "Arjun")
         if kind == "ack":
             self.live_state.setText(f"Arjun: {text}")
             return
         self._append_chat(label, text)
 
+    def _on_screen_note(self, note: str):
+        if self.live:
+            self.live.say(note, "screen")  # mutes the mic while speaking and shows the note in sync
+            return
+        self._append_chat("Arjun · watching your screen", note)
+        if self.speaker and self.speak.isChecked():
+            self.speaker.say(note)
+
+    def _live_partial(self, text: str):
+        if self.live and self.live._last_state in ("you", "transcribing"):
+            tail = text if len(text) <= 70 else "…" + text[-70:]
+            self.live_state.setText(f"●  Heard: {tail}")
+
     def _live_state(self, state: str):
-        txt = {"listening": ("●  Listening", "#1f9d63"), "you": ("●  You're speaking…", "#7ee0a8"),
-               "thinking": ("●  Arjun is thinking…", "#c98a1b"), "speaking": ("●  Arjun is speaking…", "#7fb2ff"),
-               "paused": ("●  Mic muted", "#c0392b"), "hold": ("●  Noting your answer…", "#c98a1b")}.get(state)
+        txt = {"listening": ("●  Listening", "#34d399"), "you": ("●  You're speaking…", "#5eead4"),
+               "transcribing": ("●  Got it, writing down what you said…", "#5eead4"),
+               "thinking": ("●  Arjun is thinking…", "#fbbf24"), "speaking": ("●  Arjun is speaking…", "#a78bfa"),
+               "paused": ("●  Mic muted", "#fb7185"), "hold": ("●  Noting your answer…", "#fbbf24")}.get(state)
         if txt:
             self.live_state.setText(txt[0])
             self.live_state.setStyleSheet(f"color:{txt[1]}; font-weight:600")
@@ -1271,7 +1390,7 @@ def main():
     font = app.font()
     font.setPointSize(10)
     app.setFont(font)
-    app.setStyleSheet(STYLE)
+    app.setStyleSheet(STYLE.replace("__ASSETS__", (ROOT / "assets").as_posix()))
     w = MainWindow()
     w.showMaximized()
     code = app.exec()
