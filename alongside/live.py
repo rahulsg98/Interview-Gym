@@ -23,7 +23,16 @@ from PySide6.QtCore import QObject, QTimer, Signal
 
 DONE_RE = re.compile(r"\b((i'?m|i am) done with (my|the|this) (answer|solution|code)|i'?m done|i am done|that'?s (it|all|my answer)|that is (it|all|my answer)|done with (my|the|this) "
                      r"(answer|solution|code)|next question|move on|let'?s move on|i'?m finished|finished)\b", re.I)
-BACKCHANNELS = ["Ok.", "Right.", "I see.", "Got it.", "Go on.", "Ok, go on.", "Sure."]
+BACKCHANNELS = ["Ok.", "Right.", "Alright.", "Got it.", "I see.", "Go on.", "Ok, go on.", "Right, go on."]
+HOLD_ACKS = ["Ok.", "Right.", "Alright.", "Got it.", "Noted.", "Ok, let's continue.", "Alright, let's continue."]
+_last_pick: dict[str, str] = {}
+
+
+def pick(name: str, options: list[str]) -> str:
+    """Random phrase, never the same one twice in a row, so acknowledgements sound varied."""
+    choice = random.choice([o for o in options if o != _last_pick.get(name)] or options)
+    _last_pick[name] = choice
+    return choice
 
 
 class LiveConversation(QObject):
@@ -119,7 +128,7 @@ class LiveConversation(QObject):
         self.next_after_speech = False
         self._set_state("hold")
         if random.random() < 0.6:
-            self._speak(random.choice(["Ok.", "Alright.", "Noted.", "Ok, let's continue."]))
+            self._speak(pick("hold", HOLD_ACKS))
             self._set_state("hold")
 
     def set_paused(self, paused: bool):
@@ -172,7 +181,7 @@ class LiveConversation(QObject):
         spoken = text
         if sp and getattr(sp, "natural", False) and not first and kind in sp.LEAD_INS:
             # Natural voice needs ~2 s to generate a long question: open with an instant, natural lead-in.
-            spoken = random.choice(sp.LEAD_INS[kind]) + " " + text
+            spoken = pick("lead-" + kind, sp.LEAD_INS[kind]) + " " + text
         if not self._speak(spoken, on_start) and on_start:
             on_start()
 
@@ -220,7 +229,7 @@ class LiveConversation(QObject):
         if (self.headphones and sp and self.host.speak.isChecked() and not sp.busy and not self.is_code_question()
                 and now - self.last_backchannel > 6 and random.random() < 0.8):
             self.last_backchannel = now
-            sp.say(random.choice(BACKCHANNELS))
+            sp.say(pick("ack", BACKCHANNELS))
 
     def note_edit(self):
         self.last_edit = self.last_activity = time.time()
@@ -307,7 +316,7 @@ class LiveConversation(QObject):
         if (data.get("_event") == "utterance" and now - self.last_backchannel > 8 and random.random() < 0.6
                 and not self.is_code_question()):
             self.last_backchannel = now
-            self.say(random.choice(BACKCHANNELS), "ack")
+            self.say(pick("ack", BACKCHANNELS), "ack")
         else:
             self._set_state("listening")
 

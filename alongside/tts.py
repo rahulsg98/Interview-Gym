@@ -230,9 +230,10 @@ class Speaker:
               "Ok, let's continue.", "Ok,", "Right,", "Alright,", "Sure,", "Good,", "So,", "Interesting,",
               "I see,", "Are you sure?",
               "Why?", "Go on, I'm listening.", "That's time. Thanks, we'll stop here.",
-              "Ok, next question.", "Alright, moving on.", "Right, next one.", "Ok, let's go deeper."]
-    LEAD_INS = {"question": ["Ok, next question.", "Alright, moving on.", "Right, next one."],
-                "followup": ["Ok, let's go deeper.", "Ok,", "Right,"]}
+              "Ok, next question.", "Alright, moving on.", "Right, next one.", "Ok, let's go deeper.",
+              "Alright, let's continue.", "Got it,", "Got it. Next question.", "Right, go on."]
+    LEAD_INS = {"question": ["Ok, next question.", "Alright, moving on.", "Right, next one.", "Got it. Next question."],
+                "followup": ["Ok, let's go deeper.", "Right,", "Alright,", "Got it,"]}
 
     JOINERS = {"that", "which", "who", "where", "when", "while", "because", "so", "but", "and", "or", "if",
                "for", "with", "without", "using", "to", "in", "on", "at", "from", "into", "across", "between"}
