@@ -279,6 +279,10 @@ class LiveConversation(QObject):
             return
         sp = self.host.speaker
         now = time.time()
+        if self.listener and self.listener.silent and not self.listener.muted:
+            self._set_state("nomic")  # the mic delivers nothing: say so instead of looking "stuck"
+        elif self._last_state == "nomic":
+            self._set_state("listening")
         if self.mic_busy:
             # Talking or being transcribed is activity, never silence.
             self.last_activity = now

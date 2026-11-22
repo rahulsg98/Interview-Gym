@@ -18,6 +18,7 @@ from . import loop as L
 from . import screen, soft
 from .interview import ROLES
 from .knowledge import DIFFICULTIES
+from .richview import RichView
 
 
 def _font(size: int, bold: bool = False) -> QFont:
@@ -125,7 +126,10 @@ class RoundBuilder(QWidget):
         self.reresearch_btn = QPushButton("Re-research")
         self.reresearch_btn.setToolTip("Ignore the cached research and search the web again")
         self.reresearch_btn.clicked.connect(lambda: self.research_company(True))
-        rb.addWidget(self.research_btn, 2); rb.addWidget(self.reresearch_btn, 1)
+        self.clear_btn = QPushButton("🧹 Clear")
+        self.clear_btn.setToolTip("Clear this screen, and optionally delete saved company research")
+        self.clear_btn.clicked.connect(self.clear_setup)
+        rb.addWidget(self.research_btn, 2); rb.addWidget(self.reresearch_btn, 1); rb.addWidget(self.clear_btn, 1)
         lv.addLayout(rb)
         self.research_log = QPlainTextEdit(readOnly=True)
         self.research_log.setMaximumHeight(130)
@@ -151,7 +155,8 @@ class RoundBuilder(QWidget):
         rr.addWidget(add); rr.addWidget(rem); rr.addStretch()
         mv.addLayout(rr)
         of = QFormLayout()
-        self.patience = QDoubleSpinBox(minimum=1.0, maximum=5.0, singleStep=0.5, value=2.0, suffix=" s")
+        self.patience = QDoubleSpinBox(minimum=1.5, maximum=10.0, singleStep=0.5,
+                                       value=self.host.settings.answer_pause, suffix=" s")
         self.patience.setToolTip("How long you must be silent before the interviewer treats your turn as finished")
         self.time_scale = QDoubleSpinBox(minimum=0.25, maximum=1.5, singleStep=0.25, value=1.0, suffix="×")
         self.time_scale.setToolTip("Scale all round durations, e.g. 0.5× for a quick practice loop")
@@ -166,7 +171,7 @@ class RoundBuilder(QWidget):
         self.start_btn.clicked.connect(self.start_loop)
         mv.addWidget(self.start_btn)
 
-        self.research_view = QTextBrowser(openExternalLinks=True)
+        self.research_view = RichView()
         self.research_view.setMarkdown("_Research results (rounds, reported questions, tips, sources) show here._")
         split.addWidget(left); split.addWidget(mid); split.addWidget(self.research_view)
         split.setSizes([330, 470, 520])
@@ -186,6 +191,44 @@ class RoundBuilder(QWidget):
         self.rounds.setCellWidget(row, 2, typ)
         mins = QSpinBox(minimum=5, maximum=180, value=int(r.get("duration_min", 45)), suffix=" min")
         self.rounds.setCellWidget(row, 3, mins)
+
+    def clear_setup(self):
+        if self.loop and not self.loop_finished:
+            QMessageBox.information(self, "Interview Gym", "Finish or end the running loop first.")
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle("Clear Round Builder")
+        box.setText("Clear the company, research findings and rounds from this screen?\n\n"
+                    "'Also delete saved research' removes every cached company research, so the next search "
+                    "starts fresh. Past interviews and your dashboard are kept.")
+        screen_btn = box.addButton("Clear screen", QMessageBox.AcceptRole)
+        all_btn = box.addButton("Also delete saved research", QMessageBox.DestructiveRole)
+        box.addButton(QMessageBox.Cancel)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked not in (screen_btn, all_btn):
+            return
+        self.research = None
+        self.company.clear()
+        self.research_log.clear()
+        self.rounds.setRowCount(0)
+        self.start_btn.setEnabled(False)
+        self.research_view.setMarkdown("_Research results (rounds, reported questions, tips, sources) show here._", "top")
+        self._reset_live_page()
+        self.stack.setCurrentIndex(0)
+        if clicked is all_btn:
+            n = 0
+            for f in L.COMPANY_DIR.glob("*.json"):
+                f.unlink(missing_ok=True); n += 1
+            self._load_cached()
+            self.b.status.emit(f"Round Builder cleared. Deleted {n} saved company research files.")
+        else:
+            self.b.status.emit("Round Builder cleared.")
+
+    def _reset_live_page(self):
+        """Loop over: wipe the live screen (everything is saved in Past Interviews)."""
+        self.conv_view.clear(); self.editor.clear(); self.problem_view.clear()
+        self._heard = ""
 
     def _load_cached(self):
         self.cached.clear()
@@ -256,7 +299,7 @@ class RoundBuilder(QWidget):
 
         split = QSplitter()
         left = QSplitter(Qt.Vertical)
-        self.problem_view = QTextBrowser()
+        self.problem_view = RichView()
         conv = QWidget(); cv = QVBoxLayout(conv); cv.setContentsMargins(0, 0, 0, 0)
         self.conv_view = QTextBrowser()
         self.say_box = QLineEdit(placeholderText="Type to the interviewer (Enter) - or just talk, the mic is live")
@@ -286,6 +329,11 @@ class RoundBuilder(QWidget):
         self.cam_stats = QLabel("")
         self.cam_stats.setStyleSheet("color:#8b93ab")
         bottom.addWidget(self.cam_view)
+        self.cam_btn = QPushButton("📷 Camera off")
+        self.cam_btn.setCheckable(True)
+        self.cam_btn.setToolTip("Turn the camera on or off at any time during the loop")
+        self.cam_btn.clicked.connect(lambda: self.host.toggle_camera_now())
+        bottom.addWidget(self.cam_btn)
         self.mic_on = QCheckBox("Mic live (hands-free)", checked=True)
         self.mic_on.toggled.connect(lambda on: self.listener and setattr(self.listener, "muted", not on))
         self.level = QProgressBar(maximum=100, textVisible=False); self.level.setFixedWidth(160)
@@ -307,7 +355,7 @@ class RoundBuilder(QWidget):
         back = QPushButton("Back to Round Builder"); back.clicked.connect(lambda: self.stack.setCurrentIndex(0))
         h.addWidget(self.view_btn); h.addWidget(back)
         v.addLayout(h)
-        self.report_view = QTextBrowser(openExternalLinks=True)
+        self.report_view = RichView()
         v.addWidget(self.report_view)
         return w
 
@@ -480,11 +528,12 @@ class RoundBuilder(QWidget):
         self._stop_listener()
         if self.host.speaker:
             self.host.speaker.stop()
-        if not self.host.session:
-            self.host.stop_camera()
+        if not self.host.interview_active():
+            self.host.stop_camera()  # never left on after a loop
         self.loop = None
         self.next_btn.hide()
         self.stack.setCurrentIndex(0)
+        self._reset_live_page()
         self.research_log.appendPlainText("Loop ended early and discarded (only completed loops are analysed).")
         self.b.status.emit("Loop ended early and discarded.")
 
@@ -499,9 +548,10 @@ class RoundBuilder(QWidget):
             self.end_round()
         self.clock.stop()
         self._stop_listener()
-        if not self.host.session:
-            self.host.stop_camera()
+        if not self.host.interview_active():
+            self.host.stop_camera()  # never left on after a loop
         self.stack.setCurrentIndex(2)
+        self._reset_live_page()
         self.report_view.setMarkdown("_Waiting for round scores, then writing the hiring-committee debrief…_")
 
         def work():
@@ -597,7 +647,10 @@ class RoundBuilder(QWidget):
     def _update_level(self):
         if self.listener:
             self.level.setValue(int(self.listener.level * 100))
-            if self.listener.in_speech:
+            if self.listener.silent and not self.listener.muted:
+                self._set_state("⚠ Mic sends silence: the interviewer can't hear you. Pick another Microphone "
+                                "on the Interview tab setup (earbuds in music mode have no mic).")
+            elif self.listener.in_speech:
                 if not self._heard:
                     self._set_state("🎙 You're speaking…")
             elif self.listener.transcribing:
@@ -775,7 +828,7 @@ class RoundBuilder(QWidget):
     def _on_error(self, msg: str):
         self.research_btn.setEnabled(True); self.reresearch_btn.setEnabled(True)
         self.research_log.appendPlainText("Error: " + msg)
-        QMessageBox.warning(self, "AlongSide", msg)
+        QMessageBox.warning(self, "Interview Gym", msg)
 
     def shutdown(self):
         self.clock.stop()

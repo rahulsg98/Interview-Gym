@@ -8,7 +8,7 @@ from pathlib import Path
 
 from . import llm, progress
 from . import resume as resume_mod
-from .knowledge import AREAS, DIFFICULTY_LABELS, HARSH_RULES, TIER_NAMES, TRAPS, calibration
+from .knowledge import AREAS, DIFFICULTY_LABELS, HARSH_RULES, RICH_FORMAT, TIER_NAMES, TRAPS, calibration
 from .soft import SOFT_JSON, SOFT_RUBRIC, camera_flags, delivery_flags, soft_prompt_block
 from .config import SESSIONS_DIR
 
@@ -335,7 +335,8 @@ that level and tier'; 9-10 is exceptional; 4-5 is a likely reject). Evaluate the
   "verdict": "<one line, e.g. 'Good, but missed X'>",
   "strengths": ["..."],
   "gaps": ["specific missing or wrong points"],
-  "model_answer": "<an ideal, concise interview-ready answer in markdown, with code if relevant>",
+  "model_answer": "<an ideal, concise interview-ready answer in markdown: short ### sections, code blocks with a \
+language tag and complexity, a table for trade-offs, and a ```mermaid diagram for design/flow questions>",
   "tip": "<one delivery/communication tip>",
   "trap_result": "<if a trap was set: 'Caught it' or 'Fell for it', plus one line on what they should have done; else ''>",
   "authenticity": "<resume questions only: 'Convincing' | 'Shaky' | 'Likely inflated' + why; else ''>",
@@ -417,7 +418,8 @@ Resume claim checks: {json.dumps([{"claim": t.claim, "authenticity": t.feedback.
 Per-answer gaps:
 {json.dumps([{"q": t.question, "gaps": t.feedback.get("gaps", [])} for t in scored], indent=1)[:8000]}
 
-Write the final feedback report in markdown:
+Write the final feedback report in markdown. {RICH_FORMAT}
+Start with a `> [!KEY]` callout holding the hire / no-hire style bottom line. Report sections:
 1. Overall score /10 and a hire / lean hire / lean no-hire / no-hire verdict with one-line reason.
 1b. **Resume credibility**: which claims held up, which looked shaky/inflated, and how to present them honestly with \
 real depth (only if a resume segment happened).
@@ -506,13 +508,14 @@ Soft skills (communication & confidence, last answers): {json.dumps(soft or {})}
 Recurring communication/confidence problems:
 {chr(10).join("- " + x for x in (soft_lacking or [])) or "(none recorded)"}
 
-Write a concise improvement plan in markdown:
+Write a concise improvement plan in markdown. {RICH_FORMAT}
+Plan sections:
 1. **Where you stand** - 2-3 lines, honest, relative to the bar for this level/tier.
 2. **Fix first** - the 3 weakest areas; for each: what exactly is missing (use the gaps), 3-5 concrete things to \
 study or practise (name specific LeetCode patterns/problems, design problems, concepts), and how to know it's fixed.
 3. **Communication & confidence** - the 2-3 biggest soft-skill problems with a daily drill for each (e.g. \
 answer-first structure, filler-word drill, recording yourself, STAR stories, camera eye-contact practice).
 4. **Keep sharp** - strong areas and a light maintenance routine.
-5. **Next 2 weeks** - day-by-day schedule mixing study and AlongSide mock sessions (say which role/round/difficulty).
+5. **Next 2 weeks** - day-by-day schedule mixing study and Interview Gym mock sessions (say which role/round/difficulty).
 6. **When to level up** - criteria to move to the next difficulty or company tier."""
     return llm.ask(prompt, COACH_SYSTEM, model, on_text=on_text)

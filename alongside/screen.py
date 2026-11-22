@@ -17,7 +17,7 @@ class ScreenshotError(RuntimeError):
 def capture(interactive: bool = False, timeout: float = 90) -> Path:
     """Take a screenshot. interactive=True opens GNOME's picker so you can choose a region/window.
 
-    The first time, GNOME asks whether AlongSide may take screenshots; allow it once.
+    The first time, GNOME asks whether Interview Gym may take screenshots; allow it once.
     """
     from jeepney import DBusAddress, MatchRule, new_method_call
     from jeepney.bus_messages import message_bus

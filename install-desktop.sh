@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Add AlongSide to the GNOME app launcher, with its icon. Re-run after moving the folder.
+# Add Interview Gym to the GNOME app launcher, with its icon. Re-run after moving the folder.
 set -euo pipefail
 dir="$(cd "$(dirname "$0")" && pwd)"
 icons="$HOME/.local/share/icons/hicolor"
@@ -15,7 +15,7 @@ mkdir -p ~/.local/share/applications
 cat > ~/.local/share/applications/alongside.desktop <<DESK
 [Desktop Entry]
 Type=Application
-Name=AlongSide
+Name=Interview Gym
 GenericName=Mock Interview Practice
 Comment=Practise tough IT interviews with an AI interviewer
 Exec="$dir/run.sh"
@@ -23,9 +23,9 @@ Path=$dir
 Icon=alongside
 Terminal=false
 Categories=Development;
-Keywords=interview;mock;practice;coding;system design;
+Keywords=interview;gym;mock;practice;coding;system design;AlongSide;
 StartupNotify=true
 StartupWMClass=alongside
 DESK
 update-desktop-database ~/.local/share/applications >/dev/null 2>&1 || true
-echo "Installed. Search for 'AlongSide' in Activities."
+echo "Installed. Search for 'Interview Gym' in Activities."

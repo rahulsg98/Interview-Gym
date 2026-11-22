@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Launch AlongSide (creates the venv on first run).
+# Launch Interview Gym (creates the venv on first run).
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
 if [[ ! -d .venv ]]; then
@@ -13,6 +13,6 @@ set +e
 .venv/bin/python -m alongside "$@"
 code=$?
 if [[ $code -ne 0 ]]; then
-  echo "AlongSide stopped with exit code $code. Details: ~/.local/share/alongside/alongside.log and crash.log" >&2
+  echo "Interview Gym stopped with exit code $code. Details: ~/.local/share/alongside/alongside.log and crash.log" >&2
 fi
 exit $code

@@ -158,15 +158,16 @@ class CameraTracker:
     def start(self) -> None:
         if self.running:
             return
-        self._stop.clear()
+        self._stop = threading.Event()  # a fresh flag per run, so an old loop can never be revived
         self.running = True
-        threading.Thread(target=self._run, daemon=True).start()
+        self.error = ""
+        threading.Thread(target=self._run, args=(self._stop,), daemon=True).start()
 
     def stop(self) -> None:
-        self._stop.set()
+        self._stop.set()  # the loop releases the webcam (light goes off) within one frame
         self.running = False
 
-    def _run(self) -> None:
+    def _run(self, stop_evt) -> None:
         import cv2
         try:
             det = cv2.FaceDetectorYN.create(str(ensure_face_model()), "", (320, 240), 0.7)
@@ -179,8 +180,15 @@ class CameraTracker:
             self.error = str(e)
             self.running = False
             return
+        try:
+            self._frames(cap, det, stop_evt)
+        finally:
+            cap.release()  # always free the device
+
+    def _frames(self, cap, det, stop_evt) -> None:
+        import cv2
         period = 1.0 / self.fps
-        while not self._stop.is_set():
+        while not stop_evt.is_set():
             t0 = time.time()
             ok, frame = cap.read()
             if not ok:

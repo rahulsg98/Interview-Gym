@@ -1,4 +1,4 @@
-"""AlongSide desktop UI (PySide6)."""
+"""Interview Gym desktop UI (PySide6)."""
 from __future__ import annotations
 
 import html
@@ -14,7 +14,7 @@ from PySide6.QtGui import QAction, QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QFileDialog, QFormLayout, QHBoxLayout, QInputDialog, QLabel,
     QLineEdit, QListWidget, QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
-    QSpinBox, QSplitter, QTabWidget, QTextBrowser, QVBoxLayout, QWidget, QScrollArea, QFrame, QStackedWidget,
+    QSpinBox, QDoubleSpinBox, QSplitter, QTabWidget, QTextBrowser, QVBoxLayout, QWidget, QScrollArea, QFrame, QStackedWidget,
 )
 
 from . import screen
@@ -28,9 +28,10 @@ from . import progress
 from . import soft
 from PySide6.QtGui import QImage, QPixmap
 from .tts import VOICES, voice_key
+from .richview import RichView
 
 STYLE = """
-/* ---- AlongSide theme: deep slate, violet → cyan accent, soft cards ---- */
+/* ---- Interview Gym theme: deep slate, violet → cyan accent, soft cards ---- */
 QMainWindow, QWidget#root { background: #0d0f16; color: #e9ecf5; }
 QWidget { selection-background-color: #5b3fd1; selection-color: #ffffff; }
 QLabel, QCheckBox, QRadioButton { color: #c3c8da; background: transparent; }
@@ -151,6 +152,7 @@ class Bridge(QObject):
     agenda = Signal(object)
     resume_done = Signal(object)
     screen_note = Signal(str)
+    restore_mic_test = Signal()
 
 
 def run_bg(bridge: Bridge, fn, *args, busy: bool = True):
@@ -171,7 +173,7 @@ def run_bg(bridge: Bridge, fn, *args, busy: bool = True):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("AlongSide - Mock Interview Practice")
+        self.setWindowTitle("Interview Gym")
         self.resize(1320, 840)
         self.settings = Settings.load()
         self.b = Bridge()
@@ -183,9 +185,10 @@ class MainWindow(QMainWindow):
 
         self.main_tabs = QTabWidget(objectName="mainTabs")
         self.main_tabs.setDocumentMode(True)
-        brand = QLabel("<span style='font-size:17px;font-weight:800;color:#a78bfa'>Along</span>"
-                       "<span style='font-size:17px;font-weight:800;color:#22d3ee'>Side</span>"
-                       "<span style='color:#5d6580'>&nbsp;&nbsp;·&nbsp;&nbsp;interview gym</span>", objectName="brand")
+        brand = QLabel("<span style='font-size:17px;font-weight:800;color:#a78bfa'>Interview</span>"
+                       "<span style='font-size:17px;font-weight:800;color:#22d3ee'>&nbsp;Gym</span>"
+                       "<span style='color:#5d6580'>&nbsp;&nbsp;·&nbsp;&nbsp;train like it's real</span>",
+                       objectName="brand")
         brand.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
         brand.setMinimumHeight(54)
         self.main_tabs.setCornerWidget(brand, Qt.TopLeftCorner)
@@ -258,6 +261,7 @@ class MainWindow(QMainWindow):
         b.hint_ready.connect(self._on_hint)
         b.resume_done.connect(self._on_resume_done)
         b.screen_note.connect(self._on_screen_note)
+        b.restore_mic_test.connect(lambda: self.mic_test.setEnabled(True))
         self._clock = QTimer(self, interval=1000, timeout=self._tick)
 
         QShortcut(QKeySequence("Ctrl+Space"), self, activated=self.toggle_mic)
@@ -290,6 +294,10 @@ class MainWindow(QMainWindow):
         prow.addWidget(self.profile_box, 1)
         prow.addWidget(save)
         prow.addWidget(delete)
+        clear = QPushButton("🧹 Clear")
+        clear.setToolTip("Clear the setup form, and optionally delete saved resume data")
+        clear.clicked.connect(self.clear_setup)
+        prow.addWidget(clear)
         v.addLayout(prow)
 
         f = QFormLayout()
@@ -363,6 +371,21 @@ class MainWindow(QMainWindow):
         f2.addRow("Claude model", self.model)
         f2.addRow("Voice", self.voice)
         f2.addRow("Speech model", self.whisper)
+        mic_row = QHBoxLayout()
+        self.mic_box = QComboBox()
+        self.mic_box.setToolTip("Which microphone Arjun listens to. Auto uses your default mic, but skips it if it "
+                                "sends silence (e.g. Bluetooth earbuds in music mode have no working mic).")
+        self.mic_test = QPushButton("Test")
+        self.mic_test.setToolTip("Check that this microphone actually hears you")
+        self.mic_test.clicked.connect(self._test_mic)
+        mic_row.addWidget(self.mic_box, 1); mic_row.addWidget(self.mic_test)
+        f2.addRow("Microphone", mic_row)
+        self._fill_mics()
+        self.pause_box = QDoubleSpinBox(minimum=1.5, maximum=10.0, singleStep=0.5, suffix=" s",
+                                        value=self.settings.answer_pause)
+        self.pause_box.setToolTip("How long you must stay quiet before Arjun treats your answer as finished, "
+                                  "then thinks and replies. Short pauses while you think don't end your turn.")
+        f2.addRow("Wait after I stop", self.pause_box)
         v.addLayout(f2)
         v.addWidget(self.speak)
         v.addWidget(self.live_fb)
@@ -438,7 +461,7 @@ class MainWindow(QMainWindow):
         self.heard_lbl.setToolTip("What Arjun has heard you say on this question (speech-to-text)")
         rv.addWidget(self.heard_lbl)
         rv.addWidget(self.workspace, 1)
-        self.live_fb_view = QTextBrowser(openExternalLinks=True)
+        self.live_fb_view = RichView()
         self.live_fb_view.setVisible(False)
 
         main.addWidget(left); main.addWidget(right); main.addWidget(self.live_fb_view)
@@ -498,7 +521,12 @@ class MainWindow(QMainWindow):
         self.end_btn = QPushButton("End && report")  # kept for shortcuts/state; End lives in the top bar
         self.end_btn.clicked.connect(self._confirm_end)
         self.end_btn.hide()
-        for btn in (self.hint_btn, self.repeat_btn, self.screen_btn, self.region_btn, self.skip_btn, self.fb_toggle):
+        self.cam_btn = QPushButton("📷 Camera")
+        self.cam_btn.setCheckable(True)
+        self.cam_btn.setToolTip("Turn the camera on or off at any time during the interview")
+        self.cam_btn.clicked.connect(self.toggle_camera_now)
+        for btn in (self.hint_btn, self.repeat_btn, self.screen_btn, self.region_btn, self.skip_btn, self.cam_btn,
+                    self.fb_toggle):
             r2.addWidget(btn)
         col.addLayout(r2)
         bar.addLayout(col, 1)
@@ -522,15 +550,61 @@ class MainWindow(QMainWindow):
             self.settings.code_language = name
             self.settings.save()
 
+    WELCOME = ("### Get ready\n\n"
+               "1. **Upload resume…** and wait for ✓. Press **Analysis** to see the claims Arjun will verify.\n"
+               "2. Pick role, difficulty, company tier, round and **duration**.\n"
+               "3. Check the **Microphone** (press Test), sit facing a light, and press **Start interview**.\n\n"
+               "> [!TIP] The camera only switches on during the interview, and you can turn it off any time "
+               "with **📷 Camera**.\n\n"
+               "Feedback, reports and the full history of every completed interview are in **Past Interviews**.")
+
+    def _show_welcome(self):
+        self.fb_view.setMarkdown(self.WELCOME, "top")
+
+    def _reset_live_page(self):
+        """Interview over: wipe the live screen so nothing from it lingers (it's all saved in Past Interviews)."""
+        self.chat_view.clear(); self.answer.clear(); self.pad.clear()
+        self.live_fb_view.clear()
+        self.q_card.setText("<i>Arjun will ask the first question in a moment…</i>")
+        self.agenda_lbl.setText(""); self.clock_lbl.setText(""); self.live_state.setText("")
+        self.fb_toggle.setChecked(False); self.fb_toggle.setText("📊 Feedback")
+
+    def clear_setup(self):
+        """🧹 Clear on the Interview tab: reset the form, optionally delete saved resume data."""
+        box = QMessageBox(self)
+        box.setWindowTitle("Clear interview setup")
+        box.setText("Clear the setup form: resume, job description, company and focus?\n\n"
+                    "'Also delete saved resume data' removes stored resume analyses and the resume / JD saved in "
+                    "your profiles. Past interviews and your dashboard are kept.")
+        form_btn = box.addButton("Clear form", QMessageBox.AcceptRole)
+        all_btn = box.addButton("Also delete saved resume data", QMessageBox.DestructiveRole)
+        box.addButton(QMessageBox.Cancel)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked not in (form_btn, all_btn):
+            return
+        for w in (self.resume, self.jd):
+            w.clear()
+        self.company.clear(); self.focus.clear()
+        self._refresh_resume_status()
+        self.chat_view.clear()
+        self._show_welcome()
+        if clicked is all_btn:
+            from .resume import RESUME_DIR
+            n = 0
+            for f in RESUME_DIR.glob("*.json"):
+                f.unlink(missing_ok=True); n += 1
+            for prof in self.settings.profiles.values():
+                prof["resume"] = ""; prof["jd"] = ""
+            self.settings.save()
+            self.statusBar().showMessage(f"Cleared. Deleted {n} saved resume analyses and the resume/JD in profiles.")
+        else:
+            self.statusBar().showMessage("Setup form cleared.")
+
     def _build_side(self) -> QWidget:
         self.tabs = QTabWidget()
-        self.fb_view = QTextBrowser(openExternalLinks=True)
-        self.fb_view.setMarkdown(
-            "### Get ready\n\n"
-            "1. **Upload resume…** and wait for ✓. Press **Analysis** to see the claims Arjun will verify.\n"
-            "2. Pick role, difficulty, company tier, round and **duration**.\n"
-            "3. Wear headphones, sit facing a light, and press **Start interview**.\n\n"
-            "Feedback, reports and full history of every completed interview are in the **Past Interviews** tab.")
+        self.fb_view = RichView()
+        self._show_welcome()
         side = QWidget()
         sv = QVBoxLayout(side); sv.setContentsMargins(0, 0, 0, 0)
         self.cam_view = QLabel("Camera off")
@@ -658,7 +732,10 @@ class MainWindow(QMainWindow):
         self.settings.use_camera = self.use_cam.isChecked()
         self.settings.hands_free = self.hands_free.isChecked()
         self.settings.headphones = self.headphones.isChecked()
+        self.settings.mic = self.mic_box.currentData() or ""
+        self.settings.answer_pause = self.pause_box.value()
         self._stop_live()
+        self._iv_running = True
         if self.use_cam.isChecked():
             self.start_camera()
         self.settings.save()
@@ -696,12 +773,52 @@ class MainWindow(QMainWindow):
         self.b.ready.emit()
         self._ask_next()
 
+    def _fill_mics(self):
+        from .stt import list_mics
+        self.mic_box.clear()
+        self.mic_box.addItem("Auto (default, skip silent mics)", "")
+        for node, desc in list_mics():
+            self.mic_box.addItem(desc + ("  (Bluetooth: music mode has no mic)" if node.startswith("bluez") else ""),
+                                 node)
+        i = self.mic_box.findData(self.settings.mic)
+        self.mic_box.setCurrentIndex(max(0, i))
+
+    def _test_mic(self):
+        node = self.mic_box.currentData() or ""
+        self.mic_test.setEnabled(False)
+        self.b.status.emit("Testing the microphone: say something for 2 seconds…")
+
+        def work():
+            from .stt import SILENT, choose_mic, probe_mic
+            try:
+                if node:
+                    peak = probe_mic(node, 2.5)
+                    msg = ("✓ Microphone works." if peak >= 0.03 else
+                           "Microphone is on but very quiet. Speak up or raise the input volume." if peak >= SILENT
+                           else "✗ This microphone sends silence. Pick another one.")
+                else:
+                    used, note = choose_mic("")
+                    peak = probe_mic(used, 2.5)
+                    msg = (note + " " if note else "") + ("✓ Microphone works." if peak >= 0.03 else
+                                                          "Microphone is very quiet. Speak up." if peak >= SILENT
+                                                          else "✗ No sound from the microphone.")
+            except Exception as e:  # noqa: BLE001
+                msg = f"Mic test failed: {e}"
+            self.b.status.emit(msg)
+            self.b.restore_mic_test.emit()
+        run_bg(self.b, work, busy=False)
+
     def ensure_models(self, status):
-        """Load speech + voice models (call from a background thread)."""
-        from .stt import Recorder, Transcriber
+        """Load speech + voice models and pick a working microphone (call from a background thread)."""
+        from .stt import Recorder, Transcriber, choose_mic
         from .tts import Speaker
 
         s = self.settings
+        status("Checking the microphone…")
+        node, note = choose_mic(s.mic)
+        self.mic_note = note
+        if note:
+            status("🎙 " + note)
         if self.recorder is None:
             self.recorder = Recorder()
         if self.transcriber is None or getattr(self, "_whisper_name", None) != s.whisper_model:
@@ -875,11 +992,17 @@ class MainWindow(QMainWindow):
         note = self.session.review_screen(turn, shot, on_text=self.b.stream.emit)
         self.b.screen_note.emit(note)
 
+    def interview_active(self) -> bool:
+        """An interview or a Round Builder loop is in progress (the only time the camera may run)."""
+        lp = self.builder.loop
+        return bool(getattr(self, "_iv_running", False) or (lp and not self.builder.loop_finished))
+
     def abort_interview(self):
         """Ended early: stop everything and throw the interview away (no scoring, saving or analysis)."""
         if not self.session:
             return
         self.session.aborted = True
+        self._iv_running = False
         self._set_interview_enabled(False)
         self._clock.stop()
         self._stop_live()
@@ -891,6 +1014,7 @@ class MainWindow(QMainWindow):
             self.stop_camera()
         self.session = None
         self.iv_stack.setCurrentIndex(0)
+        self._reset_live_page()
         self.start_btn.setEnabled(True)
         self.fb_view.setMarkdown("_The last interview was ended early, so it was discarded: no report, history or "
                                  "dashboard data. Only completed interviews (time up, or Arjun wraps up) are analysed._")
@@ -903,7 +1027,11 @@ class MainWindow(QMainWindow):
         self._set_interview_enabled(False)
         self._clock.stop()
         self._stop_live()
+        self._iv_running = False
+        if not self.interview_active():
+            self.stop_camera()  # interview over: the camera is never left on
         self.iv_stack.setCurrentIndex(0)
+        self._reset_live_page()
         p = self.session.profile
         self.main_tabs.setCurrentWidget(self.interviews)  # the report is written straight into Past Interviews
         self.interviews.show_pending(
@@ -1098,7 +1226,7 @@ class MainWindow(QMainWindow):
             self._clock.stop()
             self.iv_stack.setCurrentIndex(0)
         self.statusBar().showMessage("Error: " + msg.splitlines()[0])
-        QMessageBox.warning(self, "AlongSide", msg)
+        QMessageBox.warning(self, "Interview Gym", msg)
         self.start_btn.setEnabled(True)
         if self.session and self.session.turns:
             self._set_interview_enabled(True)
@@ -1122,7 +1250,7 @@ class MainWindow(QMainWindow):
             self, react_fn=self._live_react, get_code=lambda: self._pad_cache,
             is_code_question=lambda: bool(self.session and self.session.current
                                           and self.session.current.segment in CODE_SEGMENTS),
-            patience=2.0, headphones=self.headphones.isChecked())
+            patience=self.pause_box.value(), headphones=self.headphones.isChecked())
         self.live.user_text.connect(self._live_user_text)
         self.live.interviewer.connect(self._live_interviewer)
         self.live.next_requested.connect(lambda _reason: self.submit_answer())
@@ -1192,6 +1320,8 @@ class MainWindow(QMainWindow):
     def _live_state(self, state: str):
         txt = {"listening": ("●  Listening", "#34d399"), "you": ("●  You're speaking…", "#5eead4"),
                "transcribing": ("●  Got it, writing down what you said…", "#5eead4"),
+               "nomic": ("⚠  Mic sends silence: Arjun can't hear you. Pick another Microphone in setup "
+                         "(earbuds in music mode have no mic)", "#fb7185"),
                "thinking": ("●  Arjun is thinking…", "#fbbf24"), "speaking": ("●  Arjun is speaking…", "#a78bfa"),
                "paused": ("●  Mic muted", "#fb7185"), "hold": ("●  Noting your answer…", "#fbbf24")}.get(state)
         if txt:
@@ -1233,7 +1363,7 @@ class MainWindow(QMainWindow):
         f = progress.Filter(role=role, difficulty=difficulty)
         areas = progress.by_area(f)
         if not areas:
-            QMessageBox.information(self, "AlongSide", "Complete at least one scored interview first.")
+            QMessageBox.information(self, "Interview Gym", "Complete at least one scored interview first.")
             return
         gaps = {a["area"]: progress.recent_gaps(f, a["area"]) for a in areas[:6]}
         self.dashboard.show_plan("_Claude is writing your plan…_")
@@ -1265,10 +1395,13 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ history
     # ------------------------------------------------------------------ camera
     def start_camera(self):
+        if not self.interview_active():
+            return  # the camera only ever runs during an interview
         if self.camera is None:
             self.camera = soft.CameraTracker()
         self.camera.start()
         self._cam_timer.start()
+        self._sync_cam_buttons()
 
     def stop_camera(self):
         if self.camera:
@@ -1277,11 +1410,29 @@ class MainWindow(QMainWindow):
         for lbl in (self.cam_view, self.builder.cam_view, self.live_cam_view):
             lbl.clear(); lbl.setText("Camera off")
         self.cam_stats.setText("")
+        self._sync_cam_buttons()
+
+    def toggle_camera_now(self):
+        """📷 button on the live screens: switch the camera on/off for this interview only."""
+        if self.camera and self.camera.running:
+            self.stop_camera()
+        else:
+            self.start_camera()
+            if not (self.camera and self.camera.running):
+                self.statusBar().showMessage("The camera can only run during an interview.")
+        self._sync_cam_buttons()
+
+    def _sync_cam_buttons(self):
+        on = bool(self.camera and self.camera.running)
+        for btn in (getattr(self, "cam_btn", None), getattr(self.builder, "cam_btn", None)):
+            if btn:
+                btn.setChecked(on)
+                btn.setText("📷 Camera on" if on else "📷 Camera off")
 
     def _camera_toggled(self, on: bool):
         self.settings.use_camera = on
         self.settings.save()
-        if on and (self.session or self.builder.loop):
+        if on and self.interview_active():
             self.start_camera()
         elif not on:
             self.stop_camera()
@@ -1363,7 +1514,7 @@ def _install_crash_logging():
     crash_file = open(DATA_DIR / "crash.log", "a")  # noqa: SIM115 (kept open for faulthandler)
     faulthandler.enable(file=crash_file, all_threads=True)
     faulthandler.enable(file=sys.stderr, all_threads=True)
-    logging.info("AlongSide starting")
+    logging.info("Interview Gym starting")
 
     def hook(exc_type, exc, tb):
         text = "".join(traceback.format_exception(exc_type, exc, tb))
@@ -1371,7 +1522,7 @@ def _install_crash_logging():
         print(text, file=sys.stderr)
         app = QApplication.instance()
         if app:
-            QMessageBox.critical(None, "AlongSide error", f"{exc_type.__name__}: {exc}\n\nDetails: {log_path}")
+            QMessageBox.critical(None, "Interview Gym error", f"{exc_type.__name__}: {exc}\n\nDetails: {log_path}")
     sys.excepthook = hook
     threading.excepthook = lambda a: hook(a.exc_type, a.exc_value, a.exc_traceback)
 
@@ -1379,7 +1530,7 @@ def _install_crash_logging():
 def main():
     _install_crash_logging()
     app = QApplication(sys.argv)
-    app.setApplicationName("AlongSide")
+    app.setApplicationName("Interview Gym")
     app.setDesktopFileName("alongside")
     from PySide6.QtGui import QIcon
     from .config import ROOT
@@ -1388,12 +1539,16 @@ def main():
         icon.addFile(str(ROOT / "assets" / f"alongside-{size}.png"))
     app.setWindowIcon(QIcon.fromTheme("alongside", icon))
     font = app.font()
-    font.setPointSize(10)
+    font.setPointSize(11)
     app.setFont(font)
+    # Reading panes (feedback, report, history, learnings, chat, research, plans) get larger text.
+    reading = QFont(font)
+    reading.setPointSize(13)
+    app.setFont(reading, "QTextBrowser")
     app.setStyleSheet(STYLE.replace("__ASSETS__", (ROOT / "assets").as_posix()))
     w = MainWindow()
     w.showMaximized()
     code = app.exec()
     import logging
-    logging.info("AlongSide exited with code %s", code)
+    logging.info("Interview Gym exited with code %s", code)
     sys.exit(code)

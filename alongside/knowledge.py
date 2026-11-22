@@ -217,3 +217,17 @@ def calibration(role: str, difficulty: str, tier: str, company: str = "") -> str
         lines.append(f"Target company: {company.strip()}. Mirror its known interview style and domain "
                      f"(e.g. its products) when framing scenario and design questions.")
     return "\n".join(lines)
+
+
+# How Claude should format anything the candidate will read (rendered with cards, callouts, colour code and diagrams).
+RICH_FORMAT = """Formatting (it is rendered as a rich page, so use structure instead of walls of text):
+- Short paragraphs (2-3 sentences) under clear `###` subheadings; **bold** the key terms.
+- Fenced code blocks ALWAYS with a language tag (```java, ```python, ```sql, ```yaml…), with comments and Big-O.
+- Tables for comparisons, trade-offs, complexities, scores or options.
+- A Mermaid diagram (```mermaid) whenever structure or flow helps: system architecture (flowchart LR with \
+services/DBs/caches/queues), request or data flow (sequenceDiagram), algorithm steps or state (flowchart TD / \
+stateDiagram-v2), class design for LLD (classDiagram), data model (erDiagram). Keep node labels short; quote labels \
+that contain special characters, e.g. A["Cache (Redis)"]. No styling directives.
+- Callouts as blockquotes: `> [!KEY] ...` must-know point, `> [!TIP] ...` how to answer well, `> [!WARNING] ...` \
+trap or edge case, `> [!MISTAKE] ...` common wrong answer, `> [!EXAMPLE] ...` concrete example. Use a few, not many.
+- Numbered steps for procedures; bullet lists for points."""

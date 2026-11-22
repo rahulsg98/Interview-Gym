@@ -1,6 +1,6 @@
-# AlongSide
+# Interview Gym
 
-AlongSide is a personal desktop app for practising tough mock interviews for IT roles on Ubuntu (GNOME, Wayland).
+Interview Gym is a personal desktop app for practising tough mock interviews for IT roles on Ubuntu (GNOME, Wayland). (The project folder and code package are still named `alongside`.)
 
 The interviewer, "Arjun", speaks in an Indian English male voice and acts as a **harsh bar-raiser**:
 - He drills every topic deep (concept → internals → edge cases → scale → real world) and doesn't let vague answers slide.
@@ -45,8 +45,8 @@ Anything ended earlier is **discarded**: no report, no history entry and nothing
 | Tab | What it does |
 |---|---|
 | **Interview** | A question-by-question mock tailored to your resume or job description, role, difficulty and company tier. After each answer you get a score, a trap verdict, the gaps, a model answer, and soft-skill feedback. |
-| **Past Interviews** | Every completed interview and company loop, titled with its date and time, mode, role, difficulty and duration (planned and actual), plus its score. Search and filter the list. Click an entry for **Feedback** (per question or round: score, traps, resume claim checks, gaps, soft skills, model answers), the **Report**, the full **History** transcript, and **Learnings**: for every question, your actual answer next to a detailed ideal answer, key points, where you fell short, a 60-90 s "how to say it" version, likely follow-ups with answers, and what to study next. Learnings are written automatically after each completed interview; older ones have a **Generate learnings** button. Each entry can also be opened as a file or deleted. |
-| **Round Builder** | Enter a company. Claude researches the company's real interview loop on the web (LeetCode Discuss, GfG, Glassdoor, blogs) and lists the rounds with questions candidates reported. AlongSide then creates *similar* (not identical) problems and runs a **timed, hands-free loop**. The interviewer hears you out before replying, watches the built-in code editor, and gives a hiring-committee debrief at the end. |
+| **Past Interviews** | Every completed interview and company loop, titled with its date and time, mode, role, difficulty and duration (planned and actual), plus its score. Search and filter the list. Click an entry for **Feedback** (per question or round: score, traps, resume claim checks, gaps, soft skills, model answers), the **Report**, the full **History** transcript, and **Learnings**: for every question, your actual answer next to a detailed ideal answer, key points, where you fell short, a 60-90 s "how to say it" version, likely follow-ups with answers, what to study next, and **Learn more** links: docs and practice pages (each link is checked to open) plus YouTube searches on trusted channels such as NeetCode, Abdul Bari, ByteByteGo and Gaurav Sen. Learnings are written automatically after each completed interview; older ones have a **Generate learnings** or **Add study links** button. Each entry can also be opened as a file or deleted. |
+| **Round Builder** | Enter a company. Claude researches the company's real interview loop on the web (LeetCode Discuss, GfG, Glassdoor, blogs) and lists the rounds with questions candidates reported. Interview Gym then creates *similar* (not identical) problems and runs a **timed, hands-free loop**. The interviewer hears you out before replying, watches the built-in code editor, and gives a hiring-committee debrief at the end. |
 | **Dashboard** | Progress by field and difficulty: score trend, weakest areas, a readiness matrix (difficulty × company tier) and a "next step" suggestion. It has a **Soft skills** section with pace, filler words, eye contact, dimension scores and what you're lacking, plus an improvement plan written by Claude. |
 
 ## Difficulty and company tiers
@@ -58,6 +58,26 @@ Anything ended earlier is **discarded**: no report, no history entry and nothing
   - Top tier (Google, Meta…)
 
 The question pools and expectations are in [alongside/knowledge.py](alongside/knowledge.py), compiled from 2024-2026 candidate reports.
+
+## Readable reports
+Feedback, Report, History and Learnings are shown as designed pages, not plain text:
+- **Feedback and scores:** score badges, side-by-side *what you got right* and *missed or wrong*, coloured trap and claim-check chips, communication bars, and collapsible model answers.
+- **Claude's notes** use tables, syntax-highlighted code, coloured callouts (key point, tip, watch out, common mistake) and **diagrams**: architecture, flows, class designs and data models, drawn with Mermaid.
+- **History** is a chat view.
+
+Mermaid is downloaded once (3 MB). Links open in your normal browser.
+
+## Camera and clearing
+- The camera only runs **during** an interview or Round Builder loop. It switches off and releases the webcam the moment the interview ends.
+- Turn it off or on at any time with **📷 Camera** on the live screen. The setup checkbox only sets the default.
+- **🧹 Clear** on the Interview tab resets the form (resume, JD, company, focus). It can also delete saved resume analyses and the resume/JD stored in profiles.
+- **🧹 Clear** in Round Builder resets the company, findings and rounds. It can also delete all saved company research.
+- The live screens are wiped after every interview. Everything stays in Past Interviews.
+
+## Microphone
+- **Microphone** in the Interview setup: **Auto** uses your default mic, but skips any mic that sends silence. For example, Bluetooth earbuds in music mode have no working mic, so Auto falls back to the laptop mic. You can also pick a mic yourself, and **Test** checks that it actually hears you.
+- If the mic goes silent during an interview, a red warning says Arjun can't hear you.
+- **Wait after I stop** (5 s by default): how long you stay quiet before Arjun treats your answer as finished, then thinks and replies. Short pauses while you think don't end your turn.
 
 ## Soft skills
 - **Voice:** words per minute, filler words ("um", "basically", "you know"), hedging ("I think", "maybe") and long pauses. All of it is measured locally.
@@ -73,7 +93,7 @@ For the camera to work well, sit **facing** a light source, not with a window or
 | Questions, scoring, research, screen and camera review | Claude, through the Claude Code CLI (`claude -p`) with your subscription login. Web search is used for company research. | No API key |
 | Speech to text | faster-whisper (`small.en`, int8 on the CPU) | Free, offline |
 | Voice | Piper TTS, `en_US-l2arctic` speaker ASI (Indian English male) | Free, offline |
-| Hands-free listening | Voice-activity detection on `arecord`. Your speech is transcribed in pieces *while* you talk, so your words are ready about 1 s after the 2 s pause. Arjun never treats "still transcribing" as silence, and his text appears the moment his voice starts. | Local |
+| Hands-free listening | Voice-activity detection on `arecord`. Your speech is transcribed in pieces *while* you talk, so your words are ready about 1 s after the pause (5 s by default). Arjun never treats "still transcribing" as silence, and his text appears the moment his voice starts. | Local |
 | Camera | OpenCV and the YuNet face detector | Local |
 | Screen capture | xdg-desktop-portal Screenshot | Built in |
 | Data | SQLite at `~/.local/share/alongside/progress.db`, sessions in `~/.local/share/alongside/sessions` | Local |
@@ -85,7 +105,7 @@ Run these once from the project folder:
 ```bash
 claude                 # log in: type /login, choose "Claude account with subscription", then /exit
 ./run.sh               # first run creates .venv, installs dependencies and starts the app
-./install-desktop.sh   # adds AlongSide (with its icon) to the Applications menu
+./install-desktop.sh   # adds Interview Gym (with its icon) to the Applications menu
 ```
 
 On the first run, the app downloads the Whisper model (~250 MB), the voice (~75 MB) and the face model (0.2 MB).
@@ -94,10 +114,10 @@ The first time you use screen review, GNOME asks for screenshot permission. Choo
 
 ## Opening the app (every day)
 
-**You don't need the terminal.** After the one-time setup, AlongSide is a normal app and stays installed after restarts and power-offs:
+**You don't need the terminal.** After the one-time setup, Interview Gym is a normal app and stays installed after restarts and power-offs:
 
 1. Press the **Super** (Windows) key or click **Activities**.
-2. Type **AlongSide** and press **Enter**.
+2. Type **Interview Gym** (or just **gym**) and press **Enter**.
 
 Tip: right-click the icon in the dock and choose **Pin to Dash** for one-click access.
 
@@ -131,6 +151,7 @@ alongside/
   soft.py       speech delivery metrics, webcam tracker, soft-skill rubric
   dashboard.py  progress + soft-skills dashboard (QtCharts)
   progress.py   SQLite progress store and queries
+  richview.py   rich pages: cards, callouts, coloured code, Mermaid diagrams
   editor.py     workspace editor: languages, syntax colouring, auto-indent, code blocks
   llm.py        Claude via `claude -p` (stream-json, tools)
   stt.py        push-to-talk recorder, hands-free listener, faster-whisper

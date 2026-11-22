@@ -28,7 +28,9 @@ class Settings:
     use_camera: bool = True
     hands_free: bool = True
     headphones: bool = False
-    code_language: str = "Java"           # default language for coding questions in the workspace
+    code_language: str = "Java"
+    mic: str = ""                         # PipeWire mic node; "" = Auto (default mic, skipping silent ones)
+    answer_pause: float = 5.0             # seconds of silence before Arjun treats your turn as finished           # default language for coding questions in the workspace
     profiles: dict = field(default_factory=dict)  # name -> {role, resume, jd, focus}
 
     @classmethod

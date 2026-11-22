@@ -18,6 +18,7 @@ from . import progress
 from .interview import ROLES
 from .knowledge import DIFFICULTIES, TIER_NAMES
 from .soft import SOFT_HELP, SOFT_SKILLS
+from .richview import RichView
 
 BG, PANEL, GRID, TEXT, MUTED = "#0d0f16", "#161a26", "#252b3d", "#e9ecf5", "#8b93ab"
 ACCENT = "#8b5cf6"
@@ -181,7 +182,7 @@ class Dashboard(QWidget):
         self.soft_trend.setStyleSheet(f"background:{BG}; border:none")
         g.addWidget(self.soft_view, 7, 0, 1, 2)
         g.addWidget(self.soft_trend, 7, 2, 1, 2)
-        self.soft_lacking = QTextBrowser()
+        self.soft_lacking = RichView()
         self.soft_lacking.setMinimumHeight(170)
         g.addWidget(self.soft_lacking, 8, 0, 1, 4)
 
@@ -196,9 +197,9 @@ class Dashboard(QWidget):
                                              self.tier.currentText()))
         imp_bar.addWidget(self.plan_btn)
         g.addLayout(imp_bar, 9, 0, 1, 4)
-        self.gaps_view = QTextBrowser()
+        self.gaps_view = RichView()
         self.gaps_view.setMinimumHeight(220)
-        self.plan_view = QTextBrowser()
+        self.plan_view = RichView()
         self.plan_view.setMinimumHeight(220)
         g.addWidget(self.gaps_view, 10, 0, 1, 2)
         g.addWidget(self.plan_view, 10, 2, 1, 2)

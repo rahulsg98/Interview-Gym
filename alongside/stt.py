@@ -20,6 +20,92 @@ TECH_PROMPT = (
 )
 
 
+# ---------------------------------------------------------------- microphone selection
+# PipeWire node name of the mic to record from ("" = system default). Set via set_mic() / choose_mic().
+MIC_NODE = ""
+
+
+def list_mics() -> list[tuple[str, str]]:
+    """[(node_name, description)] of real capture devices, from PipeWire."""
+    import json
+    try:
+        out = subprocess.run(["pw-dump"], capture_output=True, text=True, timeout=5).stdout
+        objs = json.loads(out)
+    except Exception:  # noqa: BLE001
+        return []
+    mics = []
+    for o in objs:
+        props = (o.get("info") or {}).get("props") or {}
+        if props.get("media.class") == "Audio/Source" and props.get("node.name"):
+            mics.append((props["node.name"], props.get("node.description") or props["node.name"]))
+    return mics
+
+
+def set_mic(node: str) -> None:
+    global MIC_NODE
+    MIC_NODE = node or ""
+
+
+def _arecord(node: str | None = None) -> subprocess.Popen:
+    import os
+    env = dict(os.environ)
+    node = MIC_NODE if node is None else node
+    if node:
+        env["PIPEWIRE_NODE"] = node  # the ALSA→PipeWire bridge records from this device
+    return subprocess.Popen(["arecord", "-q", "-f", "S16_LE", "-r", str(RATE), "-c", "1", "-t", "raw"],
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env)
+
+
+def probe_mic(node: str = "", seconds: float = 1.2) -> float:
+    """Loudest RMS heard from a mic in `seconds`. ~0 means it sends pure silence (muted, unplugged, or
+    Bluetooth earbuds in music mode, which have no working microphone)."""
+    import time
+    proc = _arecord(node)
+    levels: list[float] = []
+    t0 = time.time()
+    try:
+        while time.time() - t0 < seconds:
+            raw = proc.stdout.read(960)
+            if len(raw) < 960:
+                break
+            f = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+            levels.append(float(np.sqrt(np.mean(f ** 2))))
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=2)
+        except Exception:  # noqa: BLE001
+            pass
+    # 90th percentile, so a few stray blips from a dead mic don't count as "hearing something"
+    return float(np.percentile(levels, 90)) if levels else 0.0
+
+
+SILENT = 0.002  # a real mic's room noise is ~0.005-0.03; a dead or "music mode" one stays far below this
+
+
+def choose_mic(preferred: str = "") -> tuple[str, str]:
+    """Pick the mic to use and return (node, note). `preferred` = a node name, or "" for Auto:
+    the system default if it actually hears something, otherwise the first device that does."""
+    mics = list_mics()
+    names = dict(mics)
+    if preferred and preferred in names:
+        if probe_mic(preferred) >= SILENT:
+            set_mic(preferred)
+            return preferred, ""
+        note = f"'{names[preferred]}' is sending silence."
+    else:
+        if probe_mic("") >= SILENT:
+            set_mic("")
+            return "", ""
+        note = "Your default microphone is sending silence (Bluetooth earbuds in music mode have no mic)."
+    for node, desc in sorted(mics, key=lambda m: ("bluez" in m[0], "Headset" in m[0])):
+        if node != preferred and probe_mic(node) >= SILENT:
+            set_mic(node)
+            return node, f"{note} Using '{desc}' instead."
+    set_mic(preferred)
+    return preferred, note + " No working microphone found: check the mic is on and not muted."
+
+
 class Recorder:
     """Push-to-talk recorder. start() then stop() -> float32 mono 16 kHz audio."""
 
@@ -35,10 +121,7 @@ class Recorder:
 
     def start(self) -> None:
         self._buf = bytearray()
-        self._proc = subprocess.Popen(
-            ["arecord", "-q", "-f", "S16_LE", "-r", str(RATE), "-c", "1", "-t", "raw"],
-            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-        )
+        self._proc = _arecord()
         self._thread = threading.Thread(target=self._read, daemon=True)
         self._thread.start()
 
@@ -107,21 +190,24 @@ class Listener:
         self.in_speech = False
         self.level = 0.0
         self.last_voice = 0.0
+        self.silent = False      # True when the mic has sent pure silence for a few seconds (wrong/dead mic)
+        self.threshold = 0.015
         self._proc: subprocess.Popen | None = None
         self._stop = threading.Event()
 
     def start(self) -> None:
         self._stop.clear()
-        self._proc = subprocess.Popen(
-            ["arecord", "-q", "-f", "S16_LE", "-r", str(RATE), "-c", "1", "-t", "raw"],
-            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-        )
+        self._proc = _arecord()
         threading.Thread(target=self._run, args=(self._proc,), daemon=True).start()
 
     def stop(self) -> None:
         self._stop.set()
         if self._proc:
             self._proc.terminate()
+            try:
+                self._proc.wait(timeout=2)
+            except Exception:  # noqa: BLE001
+                pass
             self._proc = None
         self.in_speech = False
         self.level = 0.0
@@ -132,10 +218,12 @@ class Listener:
 
     def _run(self, proc) -> None:
         import time
+        from collections import deque
         assert proc and proc.stdout
         nbytes = self.FRAME * 2
         fps = 1 / 0.03
-        noise: list[float] = []
+        noise: deque = deque(maxlen=100)  # recent quiet, unmuted frames -> room noise floor
+        recent: deque = deque(maxlen=100)  # last ~3 s of levels, to spot a dead mic
         thr = 0.015
         pre_roll: list[np.ndarray] = []
         speech: list[np.ndarray] = []
@@ -161,16 +249,25 @@ class Listener:
             frame = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
             rms = float(np.sqrt(np.mean(frame ** 2)))
             self.level = min(1.0, rms * 8)
-            if len(noise) < 33:  # ~1 s calibration of the room's noise floor
-                noise.append(rms)
-                if len(noise) == 33:
-                    thr = max(0.012, float(np.median(noise)) * 3.0)
-                continue
+            recent.append(rms)
+            if len(recent) == recent.maxlen:
+                # ~3 s where even the louder frames are near zero: this mic isn't delivering audio
+                self.silent = sorted(recent)[89] < SILENT
             if self.muted:
                 if self.in_speech:
                     finish(len(speech))  # keep what you already said
                 pre_roll.clear(); voiced_frames = 0
                 continue
+            if not self.in_speech:
+                # Learn the room's noise floor only from quiet, unmuted frames (never from the interviewer's
+                # voice coming out of the speakers), so the threshold adapts if the room gets louder or quieter.
+                if rms < thr * 1.5 or len(noise) < 33:
+                    noise.append(rms)
+                    if len(noise) >= 33 and len(noise) % 11 == 0:
+                        thr = min(0.06, max(0.012, float(np.median(noise)) * 2.5))
+                        self.threshold = thr
+                if len(noise) < 33:
+                    continue  # ~1 s calibration first
             loud = rms > thr
             if not self.in_speech:
                 pre_roll.append(frame)
@@ -233,6 +330,10 @@ class LiveMic:
     @property
     def level(self) -> float:
         return self.listener.level
+
+    @property
+    def silent(self) -> bool:
+        return self.listener.silent
 
     @property
     def transcribing(self) -> bool:

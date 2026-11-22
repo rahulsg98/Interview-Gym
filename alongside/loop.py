@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from . import llm
 from .config import DATA_DIR
 from .interview import COACH_SYSTEM, Profile, Session, Turn
-from .knowledge import AREAS, DIFFICULTIES, HARSH_RULES, TIER_NAMES, TRAPS, calibration
+from .knowledge import AREAS, DIFFICULTIES, HARSH_RULES, RICH_FORMAT, TIER_NAMES, TRAPS, calibration
 from . import progress
 from .soft import SOFT_JSON, SOFT_RUBRIC, camera_flags, delivery, delivery_flags, soft_prompt_block
 
@@ -316,7 +316,8 @@ Return JSON:
         prompt = f"""Mock {self.company} loop for {self.role} ({self.difficulty}). Round results:
 {json.dumps(rows, indent=1)}
 
-Write the debrief in markdown, like a {self.company} hiring committee:
+Write the debrief in markdown, like a {self.company} hiring committee. {RICH_FORMAT}
+Debrief sections:
 1. Final decision (hire/no hire) and level fit, with reasoning against {self.company}'s bar.
 2. Table: round, score, decision, one-line reason.
 3. What would have changed the decision.
