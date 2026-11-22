@@ -6,3 +6,4 @@ data/
 *.wav
 *.png
 !assets/*.png
+!docs/screenshots/*.png

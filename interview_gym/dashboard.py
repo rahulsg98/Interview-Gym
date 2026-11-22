@@ -240,7 +240,7 @@ class Dashboard(QWidget):
         plan = progress.latest_plan(f.role)
         if plan:
             self.plan_view.setMarkdown(f"_Plan from {time.strftime('%d %b %Y', time.localtime(plan[0]))}_\n\n"
-                                       + plan[1])
+                                       + plan[1], "top")
         else:
             self.plan_view.setMarkdown("_No plan yet. Do a few sessions, then press "
                                        "**Generate improvement plan with Claude**._")

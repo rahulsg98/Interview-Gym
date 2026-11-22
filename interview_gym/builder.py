@@ -276,7 +276,7 @@ class RoundBuilder(QWidget):
     def _on_research_done(self, d: dict):
         self.research = d
         self.research_btn.setEnabled(True); self.reresearch_btn.setEnabled(True)
-        self.research_view.setMarkdown(L.research_markdown(d))
+        self.research_view.setMarkdown(L.research_markdown(d), "top")
         self.rounds.setRowCount(0)
         for r in d.get("rounds", []):
             self._add_round_row(r, True)
@@ -440,7 +440,7 @@ class RoundBuilder(QWidget):
         if not self.loop or self.loop_finished or idx != self.idx:
             return
         r = self.loop.rounds[idx]
-        self.problem_view.setMarkdown(f"## {problem.get('title', r.name)}\n\n{problem.get('statement', '')}")
+        self.problem_view.setMarkdown(f"## {problem.get('title', r.name)}\n\n{problem.get('statement', '')}", "top")
         self.remaining = r.duration_min * 60
         self.warned = set()
         self.paused = False

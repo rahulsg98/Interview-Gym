@@ -490,7 +490,7 @@ class MainWindow(QMainWindow):
         self.heard_lbl = QLabel("")
         self.heard_lbl.setObjectName("heard")
         self.heard_lbl.setWordWrap(True)
-        self.heard_lbl.setMaximumHeight(46)
+        self.heard_lbl.setMaximumHeight(80)  # room for two lines at the larger font
         self.heard_lbl.setToolTip("What Arjun has heard you say on this question (speech-to-text)")
         rv.addWidget(self.heard_lbl)
         rv.addWidget(self.workspace, 1)
@@ -507,7 +507,7 @@ class MainWindow(QMainWindow):
         def _answer_changed():
             self._answer_cache = self.answer.toPlainText().strip()
             t = self._answer_cache
-            self.heard_lbl.setText(("🎙 Heard: " + (t if len(t) <= 220 else "…" + t[-220:])) if t else "")
+            self.heard_lbl.setText(("🎙 Heard: " + (t if len(t) <= 160 else "…" + t[-160:])) if t else "")
             self.heard_lbl.setVisible(bool(t))
         self.answer.textChanged.connect(_answer_changed)
         _answer_changed()
@@ -819,7 +819,7 @@ class MainWindow(QMainWindow):
         a = resume_mod.cached(self.resume.toPlainText())
         if a:
             self.tabs.setCurrentWidget(self.fb_view)
-            self.fb_view.setMarkdown(resume_mod.markdown(a))
+            self.fb_view.setMarkdown(resume_mod.markdown(a), "top")
 
     # ------------------------------------------------------------------ interview flow
     def start_interview(self):

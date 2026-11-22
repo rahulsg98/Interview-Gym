@@ -1,169 +1,255 @@
 # Interview Gym
 
-Interview Gym is a personal desktop app for practising tough mock interviews for IT roles on Ubuntu (GNOME, Wayland).
+**Practise tough IT interviews out loud, on your own Ubuntu laptop, with an AI interviewer that listens, pushes back and grades you.**
 
-The interviewer, "Arjun", speaks in an Indian English male voice and acts as a **harsh bar-raiser**:
-- He drills every topic deep (concept → internals → edge cases → scale → real world) and doesn't let vague answers slide.
-- He sets hidden **interview traps**: false premises, pushback on correct answers, missing constraints and moving goalposts.
-- He never repeats a question from your past sessions.
-- Even **Easy** follows today's market bar, with LeetCode medium as the floor.
+The interviewer, "Arjun", talks to you in a natural voice, waits until you've finished speaking, digs into your resume, watches the code you type, sets traps, and writes detailed feedback, a report and study notes after every interview. Speech recognition, the voice, the camera analysis and all your data stay on your machine; the interviewer's brain is Claude, used through your own Claude subscription.
 
-He also judges your **communication and confidence**, from your voice and your webcam.
+![Live interview](docs/screenshots/02-live-interview.png)
 
-## Resume grilling and timed interviews
-- **Upload resume** (.pdf, .docx, .txt or .md). Claude analyses the experience section:
-  - every role and each concrete claim
-  - the numbers you quote, and a risk level for inflated or team-credit claims
-  - red flags such as vague claims, missing baselines and timeline gaps
-  - a list of verification questions
+> All screenshots use sample data.
 
-  **Analysis** shows you exactly what Arjun will probe.
-- **Every interview includes a resume segment.** Arjun goes claim by claim and checks the work is really yours: architecture, your exact part, how you measured the numbers, failures, and what you'd change. He cross-checks for consistency. Each answer gets a **claim check**: *Convincing*, *Shaky* or *Likely inflated*.
-- **Duration:** 15 min, 30 min, 45 min, 1 hr, 1.5 hr or 2 hr. Claude plans an **agenda** to fit, splitting the time between resume, theory, DSA coding, machine coding/LLD, system design and behavioral, based on duration, role, level and round type. Roughly:
-  - **15 min:** resume plus rapid theory
-  - **45 min:** resume, theory and one coding problem
-  - **2 hr:** resume, theory, coding, machine coding and HLD
+## Contents
+- [What it does](#what-it-does)
+- [Screenshots](#screenshots)
+- [Requirements](#requirements)
+- [Setup](#setup)
+- [Review guide: check that everything works](#review-guide-check-that-everything-works)
+- [Everyday use](#everyday-use)
+- [How the interviewer behaves](#how-the-interviewer-behaves)
+- [Features in detail](#features-in-detail)
+- [How it works](#how-it-works)
+- [Data and privacy](#data-and-privacy)
+- [Troubleshooting](#troubleshooting)
+- [Project layout](#project-layout)
+- [Credits and licences](#credits-and-licences)
 
-  A countdown and the agenda are shown above the chat. Questions follow the current segment, and the interview ends when time is up.
-- **One big workspace:** the live screen has a single editor that Arjun reads, next to the question and chat. What you *say* is captured automatically and shown in a slim **Heard** line above it.
-  - Pick a **Language** (Java, Python, C++, C, JavaScript, TypeScript, Go, Kotlin, SQL, Bash, YAML/JSON) for syntax colouring, line numbers and auto-indent. Enter keeps the indent and adds a level after `{` `(` `[` (or `:` in Python). Tab and Shift+Tab indent and dedent, also for a selection. A closing bracket on an empty line dedents itself. There is no compiler.
-  - **Notes** mode is for theory and system design: headings, bullets and **{ } Code block** snippets (```` ```java ```` … ```` ``` ````), each coloured in its own language.
-  - Coding questions switch to your last-used language; theory and design switch to Notes. To draw diagrams, use a whiteboard app and press **Review my screen**.
+## What it does
 
-## Only completed interviews count
-An interview is **completed** when:
-- the timer runs out,
-- Arjun wraps up, or
-- you press End after at least 90% of the time has passed.
-
-A Round Builder loop is completed when every selected round has finished.
-
-Anything ended earlier is **discarded**: no report, no history entry and nothing added to the Dashboard. You'll be asked to confirm before it's thrown away. Closing the app mid-interview also discards it.
-
-## Tabs
-
-| Tab | What it does |
+| Tab | What you get |
 |---|---|
-| **Interview** | A question-by-question mock tailored to your resume or job description, role, difficulty and company tier. After each answer you get a score, a trap verdict, the gaps, a model answer, and soft-skill feedback. |
-| **Past Interviews** | Every completed interview and company loop, titled with its date and time, mode, role, difficulty and duration (planned and actual), plus its score. Search and filter the list. Click an entry for **Feedback** (per question or round: score, traps, resume claim checks, gaps, soft skills, model answers), the **Report**, the full **History** transcript, and **Learnings**: for every question, your actual answer next to a detailed ideal answer, key points, where you fell short, a 60-90 s "how to say it" version, likely follow-ups with answers, what to study next, and **Learn more** links: docs and practice pages (each link is checked to open) plus YouTube searches on trusted channels such as NeetCode, Abdul Bari, ByteByteGo and Gaurav Sen. Learnings are written automatically after each completed interview; older ones have a **Generate learnings** or **Add study links** button. Each entry can also be opened as a file or deleted. |
-| **Round Builder** | Enter a company. Claude researches the company's real interview loop on the web (LeetCode Discuss, GfG, Glassdoor, blogs) and lists the rounds with questions candidates reported. Interview Gym then creates *similar* (not identical) problems and runs a **timed, hands-free loop**. The interviewer hears you out before replying, watches the built-in code editor, and gives a hiring-committee debrief at the end. |
-| **Dashboard** | Progress by field and difficulty: score trend, weakest areas, a readiness matrix (difficulty × company tier) and a "next step" suggestion. It has a **Soft skills** section with pace, filler words, eye contact, dimension scores and what you're lacking, plus an improvement plan written by Claude. |
+| **Interview** | A timed, hands-free mock interview (15 min to 2 hr) for Software, Frontend, Backend, Full Stack, DevOps, LLD/HLD or DSA roles. Claude plans an agenda (resume, theory, coding, machine coding, system design, behavioral) to fit the time. One big workspace for code and notes, with syntax colouring for 11 languages. |
+| **Past Interviews** | Every completed interview with **Feedback** (scores, traps, claim checks, soft skills, model answers), the final **Report**, the full **History** as a chat, and **Learnings**: ideal answers with diagrams, your mistakes, a "how to say it" version, likely follow-ups and verified study links. |
+| **Round Builder** | Type a company: Claude researches its real interview loop on the web, lists the rounds with reported questions, then runs a timed loop of similar (not identical) problems with a hiring-committee debrief. |
+| **Dashboard** | Score trend, weakest areas, readiness by difficulty × company tier, soft skills (pace, filler words, eye contact) and an improvement plan. |
 
-## Difficulty and company tiers
-- **Easy** is 0-2 years, **Medium** is 2-4 years, **Hard** is 4-5+ years. All of them are pitched at today's tougher market.
-- **Tiers**, from lowest bar to highest:
-  - Startup
-  - Product unicorn (Flipkart, Razorpay, Swiggy, CRED, PhonePe…)
-  - Big Tech (Microsoft, Amazon, Atlassian, Uber…)
-  - Top tier (Google, Meta…)
+## Screenshots
 
-The question pools and expectations are in [interview_gym/knowledge.py](interview_gym/knowledge.py), compiled from 2024-2026 candidate reports.
+| | |
+|---|---|
+| **Setup** — role, difficulty, company tier, round, duration, resume, mic and voice<br>![Setup](docs/screenshots/01-setup.png) | **Live interview** — question, conversation, workspace with Java colouring, what Arjun heard<br>![Live interview](docs/screenshots/02-live-interview.png) |
+| **Feedback** — score per question, trap verdict, right vs missed, communication scores<br>![Feedback](docs/screenshots/03-feedback.png) | **Learnings** — ideal answer explained with a diagram, key points, mistakes, links<br>![Learnings](docs/screenshots/04-learnings.png) |
+| **Report** — bottom line, scores by topic, what to fix first<br>![Report](docs/screenshots/05-report.png) | **History** — the whole interview as a chat<br>![History](docs/screenshots/06-history.png) |
+| **Round Builder** — researched company loop with reported questions and sources<br>![Round Builder](docs/screenshots/07-round-builder.png) | **Dashboard** — progress, weak areas, readiness matrix, soft skills<br>![Dashboard](docs/screenshots/08-dashboard.png) |
 
-## Readable reports
-Feedback, Report, History and Learnings are shown as designed pages, not plain text:
-- **Feedback and scores:** score badges, side-by-side *what you got right* and *missed or wrong*, coloured trap and claim-check chips, communication bars, and collapsible model answers.
-- **Claude's notes** use tables, syntax-highlighted code, coloured callouts (key point, tip, watch out, common mistake) and **diagrams**: architecture, flows, class designs and data models, drawn with Mermaid.
-- **History** is a chat view.
+## Requirements
 
-Mermaid is downloaded once (3 MB). Links open in your normal browser.
+| Need | Details |
+|---|---|
+| **OS** | Ubuntu 22.04 or newer with GNOME (developed and tested on Ubuntu 26.04, Wayland). Other Linux desktops with PipeWire should work but are untested. Not for Windows or macOS. |
+| **Python** | 3.10 or newer (tested with 3.14), plus `python3-venv`. |
+| **Claude** | The [Claude Code](https://claude.com/claude-code) CLI, logged in with a **paid Claude plan (Pro or Max)**. The Free plan doesn't include Claude Code. No API key needed. A 45-minute hands-free interview makes roughly 100+ requests: Pro works but you may hit its limits on long sessions; Max is comfortable. |
+| **Audio** | A microphone and speakers or headphones. PipeWire (`pw-play`, `pw-dump`) and ALSA (`arecord`), which are standard on Ubuntu. Headphones or earbuds are recommended. |
+| **Camera** | Optional. Any webcam (`/dev/video0`) for confidence and eye-contact feedback. |
+| **Hardware** | Any recent x86-64 CPU with 4+ cores and 8 GB RAM. **No GPU needed.** |
+| **Disk** | About 2.5 GB: ~1.4 GB of Python packages and ~800 MB of models downloaded on first use. |
+| **Internet** | Needed for Claude and for the one-time downloads. Speech, voice and camera then work offline. |
 
-## Layout
-- **Resizable setup column:** drag the divider and the form reflows. Button rows stack, dropdowns shrink and labels move above their fields. Below its minimum width the column folds away; **▸ Show setup** brings it back. **◂ Hide setup** folds it in one click.
-- **⛶ Full screen** on Past Interviews and on the Interview side panel shows that reading block on the whole screen. **F11** toggles full screen, and **Esc** exits.
+## Setup
 
-## Camera and clearing
-- The camera only runs **during** an interview or Round Builder loop. It switches off and releases the webcam the moment the interview ends.
-- Turn it off or on at any time with **📷 Camera** on the live screen. The setup checkbox only sets the default.
-- **🧹 Clear** on the Interview tab resets the form (resume, JD, company, focus). It can also delete saved resume analyses and the resume/JD stored in profiles.
-- **🧹 Clear** in Round Builder resets the company, findings and rounds. It can also delete all saved company research.
-- The live screens are wiped after every interview. Everything stays in Past Interviews.
+**1. System packages** (most are already installed on Ubuntu):
 
-## Microphone
-- **Microphone** in the Interview setup: **Auto** uses your default mic, but skips any mic that sends silence. For example, Bluetooth earbuds in music mode have no working mic, so Auto falls back to the laptop mic. You can also pick a mic yourself, and **Test** checks that it actually hears you.
-- If the mic goes silent during an interview, a red warning says Arjun can't hear you.
-- **Wait after I stop** (3 s by default): how long you stay quiet before Arjun treats your answer as finished, then thinks and replies. A short thinking pause mid-answer doesn't make him interrupt: he only responds when your answer sounds finished.
-- **"Take your time"** only comes after about 5 s with no speech at all, and later nudges wait longer (about 15 s, then 30 s). Background noise doesn't count as speech.
-- **Background noise is ignored.** A neural voice detector (Silero, bundled with faster-whisper) only counts real human speech, so fans, typing and traffic don't keep your turn open.
-- **Arjun always finishes his sentence**, even if you start talking. With **headphones/earbuds** ticked, the mic stays on while he talks, so you're still heard, and he says a quick "Okay." or "I see." the moment you pause.
+```bash
+sudo apt install git python3-venv alsa-utils pipewire-bin xdg-desktop-portal-gnome
+```
 
-## Soft skills
-- **Voice:** words per minute, filler words ("um", "basically", "you know"), hedging ("I think", "maybe") and long pauses. All of it is measured locally.
-- **Camera:** time in frame, eye contact (estimated from head pose) and fidgeting. This runs locally with OpenCV's YuNet face detector. The live preview tells you if your lighting or framing is wrong.
-- **Claude** scores Clarity, Structure, Conciseness, Confidence, Presence, Listening and Thinking aloud. It uses your transcript, the measurements above, and an occasional webcam snapshot.
+**2. Claude Code** — install it and log in once:
 
-For the camera to work well, sit **facing** a light source, not with a window or lamp behind you, and keep your whole face in frame.
+```bash
+curl -fsSL https://claude.ai/install.sh | bash
+```
+
+```bash
+claude
+```
+
+In Claude, type `/login`, choose **Claude account with subscription**, finish the login in your browser, then type `/exit`. Check it works:
+
+```bash
+claude -p "Say ready"
+```
+
+**3. Get the code and start the app:**
+
+```bash
+git clone https://github.com/rahulsg98/Interview-Gym.git
+```
+
+```bash
+cd Interview-Gym && ./run.sh
+```
+
+The first run creates a virtual environment in `.venv` and installs the Python packages (a few minutes), then opens the app.
+
+**4. Add it to the Applications menu** (optional but handy):
+
+```bash
+./install-desktop.sh
+```
+
+After that, open it like any app: press **Super**, type **Interview Gym**, press Enter.
+
+**What downloads on first use** (once, into `~/.local/share/interview-gym/models`):
+
+| Model | Size | When |
+|---|---|---|
+| NVIDIA Parakeet TDT 0.6B v2 (speech to text) | ~650 MB | First interview |
+| Kokoro-82M (natural voice) | ~120 MB | First interview or voice preview |
+| Mermaid (diagrams in reports) | 3 MB | First launch |
+| YuNet face detector | 0.2 MB | First time the camera is on |
+| Piper voice / Whisper model | 60–250 MB | Only if you pick a "Classic" voice or a Whisper speech model |
+
+The first time you use **Review my screen**, GNOME asks for screenshot permission: choose **Allow**.
+
+## Review guide: check that everything works
+
+A 15–20 minute walkthrough for anyone evaluating the app. Expected results are in *italics*.
+
+1. **Launch** with `./run.sh`.
+   *A maximised dark window with four tabs: Interview, Past Interviews, Round Builder, Dashboard.*
+2. **Microphone:** in setup, leave Microphone on **Auto** and press **Test**, then speak.
+   *The status bar says "✓ Microphone works". If it says the mic sends silence (common with Bluetooth earbuds in music mode), pick the laptop mic.*
+3. **Voice:** press **▶ Preview** next to Voice.
+   *After a few seconds (first time: model download) Arjun reads a sample line in a natural Indian English male voice.*
+4. **Start an interview:** Role *Software Developer*, Difficulty *Medium*, Duration **15 min**, tick **Hands-free conversation** (and **Headphones / earbuds** if you wear them), optionally paste a resume, then **Start interview**.
+   *The live screen opens with an agenda and countdown. Arjun speaks his first question and the text appears as he starts speaking.*
+5. **Answer out loud.** Talk for 20–30 seconds, then stop.
+   *While you talk the status shows "You're speaking…" and a **🎙 Heard** line fills in. About 3 s after you stop, Arjun acknowledges ("Ok." / "Got it.") and then probes or moves on. Your words also appear in the chat.*
+6. **Silence check:** after a question, say nothing.
+   *After about 5 s of silence Arjun says something like "Take your time…". Background noise alone doesn't count as speaking.*
+7. **Coding:** when a coding question comes up, type a solution in the workspace.
+   *The workspace switches to your code language with colouring and auto-indent. When you pause typing, Arjun reads the code and comments.*
+8. **Finish:** let the timer run out, or press **■ End interview** after 90% of the time. Interviews ended earlier are discarded by design.
+   *You land on Past Interviews. The report streams in, then Feedback, History and Learnings fill in. Learnings include ideal answers, diagrams and study links. Try **⛶ Full screen** (Esc exits).*
+9. **Round Builder:** enter a company (e.g. *Atlassian*), press **Research company**.
+   *After 1–4 minutes: the rounds, reported questions, tips and sources. **Start timed loop** (set Time scale to 0.25× for a quick check) runs the rounds hands-free.*
+10. **Dashboard:** open the tab.
+    *Score trend, weakest areas, readiness matrix and soft-skill numbers from your completed interviews.*
+11. **Logs:** `~/.local/share/interview-gym/interview-gym.log` records each listening step (`mic: …`) and interviewer decision (`live: …`), which is the first place to look if something feels off.
+
+## Everyday use
+
+- Open **Interview Gym** from Activities. No terminal needed.
+- Your profiles, resume analyses, interviews and dashboard data are kept in `~/.local/share/interview-gym`.
+- **Keys** (Interview tab): **Ctrl+Space** mute/unmute, **Ctrl+Enter** submit answer, **Ctrl+H** hint, **Ctrl+Shift+S** review my screen, **F11** full screen, **Esc** exit full screen.
+- **After pulling updates:** run `./run.sh` once from the terminal; if `requirements.txt` changed, run `.venv/bin/python -m pip install -r requirements.txt`.
+- **If you move the folder:** run `./install-desktop.sh` again so the launcher points to the new place.
+
+## How the interviewer behaves
+
+Arjun is a **harsh bar-raiser**:
+- He drills every topic deep (concept → internals → edge cases → scale → real world) and doesn't let vague answers slide.
+- He sets hidden **traps**: false premises, pushback on correct answers, missing constraints and moving goalposts.
+- He never repeats a question from your past sessions, and even **Easy** follows today's market bar (LeetCode medium is the floor).
+- **Every interview grills your resume:** claim by claim, he checks the work is really yours (your exact part, how you measured numbers, failures, what you'd change). Each answer gets a claim check: *Convincing*, *Shaky* or *Likely inflated*.
+
+Conversation rules:
+- He waits **3 s** after you stop (adjustable under *Wait after I stop*), and only responds when your answer sounds finished; a thinking pause doesn't make him jump in.
+- He acknowledges with short words (Ok / Right / Alright / Got it), varied.
+- He always finishes his own sentence. With headphones ticked, the mic stays on while he talks, so you're still heard.
+- "Take your time" only after ~5 s of real silence; later nudges wait longer (~15 s, ~30 s).
+
+Difficulty: **Easy** 0–2 years, **Medium** 2–4, **Hard** 4–5+. Company tiers from lowest bar to highest: Startup → Product unicorn (Flipkart, Razorpay, Swiggy…) → Big Tech (Microsoft, Amazon, Atlassian…) → Top tier (Google, Meta…). Question pools and expectations are in [interview_gym/knowledge.py](interview_gym/knowledge.py).
+
+## Features in detail
+
+- **Resume analysis:** upload .pdf, .docx, .txt or .md. **Analysis** shows every claim Arjun will verify, its risk level and red flags.
+- **Timed agenda:** 15 min to 2 hr, split between resume, theory, DSA, machine coding/LLD, system design and behavioral, shown with a countdown.
+- **Workspace:** one editor for code and notes. Languages: Java, Python, C++, C, JavaScript, TypeScript, Go, Kotlin, SQL, Bash, YAML/JSON, with line numbers and IDE-style indentation (no compiler). **Notes** mode mixes text with `{ } Code block` snippets, ideal for system design. Use any whiteboard app plus **Review my screen** for drawings.
+- **Readable reports:** score badges, side-by-side strengths and gaps, coloured callouts, syntax-highlighted code, tables and **Mermaid diagrams** (architecture, flows, class designs). History is a chat view.
+- **Learnings:** for every question, the ideal answer explained from first principles, key points, where you fell short, a 60–90 s spoken version, follow-ups with answers, and **Learn more** links: docs and practice pages (each checked to open) plus YouTube searches on channels such as NeetCode, Abdul Bari, ByteByteGo and Gaurav Sen.
+- **Soft skills:** pace, filler words, hedging and pauses (measured locally from your voice); time in frame, eye contact and fidgeting (local webcam analysis); Claude scores Clarity, Structure, Conciseness, Confidence, Presence, Listening and Thinking aloud.
+- **Only completed interviews count:** the timer runs out, Arjun wraps up, or you end after 90% of the time. Anything ended earlier is discarded (you're asked first).
+- **Camera:** runs only during an interview, can be switched off any time with **📷 Camera**, and is always released when the interview ends.
+- **Microphone:** **Auto** skips mics that send silence; a red warning appears if the mic goes silent mid-interview.
+- **Clear:** 🧹 buttons reset the Interview and Round Builder screens and can delete saved resume data or company research.
+- **Layout:** the setup column reflows as you resize it and folds away below its minimum width; reading panels can go full screen.
 
 ## How it works
 
-| Part | Tool | Cost |
+| Part | Tool | Runs |
 |---|---|---|
-| Questions, scoring, research, screen and camera review | Claude, through the Claude Code CLI (`claude -p`) with your subscription login. Web search is used for company research. | No API key |
-| Speech to text | **NVIDIA Parakeet TDT 0.6B v2** (ONNX, int8, CC-BY-4.0). In tests on accented, noisy technical answers it was the most accurate (9.2% word errors vs 9.8% for Whisper small.en) and ~8× faster. Whisper models remain selectable. | Free, offline |
-| Voice | **Natural:** Kokoro-82M (Apache-2.0) on the CPU, default an Indian male voice (`hm_psi`), plus US, British and blended male voices. **Classic:** Piper voices (faster, but robotic). Pick one under **Voice** and press **▶ Preview**. A headset-style EQ trims the bass for clarity, and **Voice speed** (Slow to Fast, default Normal) sets the pace. | Free, offline |
-| Hands-free listening | Silero neural voice detection plus the room's noise level on `arecord`, so background noise is ignored and quiet speech in a noisy room is still caught (1 s of audio before detection is kept, so first words aren't lost). Your speech is transcribed in pieces *while* you talk, so your words are ready right after the 3 s pause. Arjun never treats "still transcribing" as silence, and his text appears the moment his voice starts. | Local |
-| Camera | OpenCV and the YuNet face detector | Local |
-| Screen capture | xdg-desktop-portal Screenshot | Built in |
-| Data | SQLite at `~/.local/share/interview-gym/progress.db`, sessions in `~/.local/share/interview-gym/sessions` | Local |
+| Questions, reactions, scoring, research, reports | Claude via the Claude Code CLI (`claude -p`, your subscription). Web search for company research. | Cloud (your Claude account) |
+| Speech to text | **NVIDIA Parakeet TDT 0.6B v2** (ONNX int8). On accented, noisy technical speech it had 9.2% word errors vs 9.8% for Whisper small.en, and was ~8× faster. Whisper models are selectable. | Local CPU |
+| Listening | Silero voice detection plus the room's noise level, so noise is ignored and quiet speech still counts; 1 s of pre-roll keeps first words; transcription runs while you talk. | Local CPU |
+| Voice | **Kokoro-82M** natural voices (default Indian male), headset-style EQ, speed setting; "Classic" Piper voices as a fast fallback. | Local CPU |
+| Camera | OpenCV + YuNet face detector | Local CPU |
+| Screen review | xdg-desktop-portal Screenshot | Local |
+| UI | PySide6 (Qt 6), QtWebEngine for reports, Mermaid for diagrams, Pygments for code colouring | Local |
+| Data | SQLite + JSON in `~/.local/share/interview-gym` | Local |
 
-## Setup (one time only)
+## Data and privacy
 
-The project lives in the `Interview-Gym` folder (GitHub: `rahulsg98/Interview-Gym`, private).
+- **Stays on your machine:** audio recordings, speech recognition, the voice, camera frames and analysis, and all saved interviews, resumes and settings.
+- **Sent to Claude (your account):** the transcript of what you say, what you type in the workspace, your resume / job description if you add them, and occasional webcam snapshots or screenshots when the camera or screen review is on.
+- **Web lookups:** company research uses Claude's web search; study links in Learnings are checked by fetching those public pages.
+- Nothing is uploaded anywhere else, and the repository never contains your data.
 
-Run these once from the project folder:
+## Troubleshooting
 
-```bash
-claude                 # log in: type /login, choose "Claude account with subscription", then /exit
-./run.sh               # first run creates .venv, installs dependencies and starts the app
-./install-desktop.sh   # adds Interview Gym (with its icon) to the Applications menu
-```
-
-On the first run, the app downloads the speech-to-text model (~650 MB), the natural voice model (~120 MB) and the face model (0.2 MB).
-
-The first time you use screen review, GNOME asks for screenshot permission. Choose **Allow**.
-
-## Opening the app (every day)
-
-**You don't need the terminal.** After the one-time setup, Interview Gym is a normal app and stays installed after restarts and power-offs:
-
-1. Press the **Super** (Windows) key or click **Activities**.
-2. Type **Interview Gym** (or just **gym**) and press **Enter**.
-
-Tip: right-click the icon in the dock and choose **Pin to Dash** for one-click access.
-
-Your login, profiles, resume analyses, history and dashboard data are kept in `~/.local/share/interview-gym`, so nothing is lost when you close the app or restart.
-
-### When you would use the terminal
-- **To see errors live while troubleshooting:** `./run.sh` from the project folder. Errors also always appear in a pop-up and in `~/.local/share/interview-gym/interview-gym.log`.
-- **If Claude asks you to log in again** (questions fail with a "log in" error): run `claude`, then `/login`.
-- **If you move or rename the project folder:** run `./install-desktop.sh` again from the new location so the launcher points to it.
-- **After pulling updates from GitHub:** if `requirements.txt` changed, run `.venv/bin/pip install -r requirements.txt`.
-
-## Keys (Interview tab)
-- **Ctrl+Space:** mic on/off
-- **Ctrl+Enter:** submit your answer
-- **Ctrl+H:** hint
-- **Ctrl+Shift+S:** review my screen
-
-## Tips
-- Use headphones in the Round Builder. Then tick "I'm wearing headphones" so you can talk over the interviewer.
-- Set "Time scale" to 0.5× for a quick loop.
-- Company research is cached. Use **Re-research** to refresh it.
+| Problem | Fix |
+|---|---|
+| Questions fail with a "log in" error | Run `claude`, then `/login`. Check with `claude -p "Say ready"`. |
+| Arjun never hears you | Press **Test** next to Microphone. Bluetooth earbuds in music mode have no mic: pick the laptop mic. Check the mic isn't muted in Settings → Sound. |
+| No voice | Check speakers/headphones in Settings → Sound and that `pw-play` exists (`sudo apt install pipewire-bin`). Try **▶ Preview**. |
+| Voice is slow to start the first time | The voice model loads and prepares common phrases in the background (about 20 s); later replies start quickly. |
+| Camera shows an error | Close other apps using the webcam. Sit facing a light, not with a window behind you. |
+| Screen review fails | Allow the GNOME screenshot permission when asked. |
+| App doesn't start | Run `./run.sh` in a terminal to see the error; details are in `~/.local/share/interview-gym/interview-gym.log` and `crash.log`. On X11, Qt may need `sudo apt install libxcb-cursor0`. |
+| `kokoro-onnx` won't install on new Python | It declares Python < 3.14 but works on 3.14; `run.sh` installs it with `--ignore-requires-python`. |
 
 ## Project layout
+
 ```
+run.sh              start the app (creates .venv on first run)
+install-desktop.sh  add Interview Gym to the Applications menu
+requirements.txt    Python packages
+assets/             app icon
+docs/screenshots/   README screenshots (sample data)
 interview_gym/
-  ui.py         main window, Interview tab, camera preview
-  builder.py    Round Builder: research UI, timed hands-free loop, editor
-  loop.py       company research (web), loop engine, traps & escalations, round scoring
+  ui.py         main window, Interview tab, setup, live screen, camera
+  live.py       hands-free conversation: turn-taking, acknowledgements, nudges
+  stt.py        microphone selection, voice detection, Parakeet / Whisper transcription
+  tts.py        Kokoro and Piper voices, EQ, phrase cache, playback
   interview.py  interview engine, harsh interviewer prompts, scoring, reports
-  knowledge.py  difficulty bars, company tiers, topic ladders, trap catalogue
-  soft.py       speech delivery metrics, webcam tracker, soft-skill rubric
-  dashboard.py  progress + soft-skills dashboard (QtCharts)
-  progress.py   SQLite progress store and queries
+  loop.py       company research (web), Round Builder loop engine, round scoring
+  builder.py    Round Builder tab
+  reports.py    Past Interviews tab: feedback, report, history, learnings
   richview.py   rich pages: cards, callouts, coloured code, Mermaid diagrams
-  editor.py     workspace editor: languages, syntax colouring, auto-indent, code blocks
-  llm.py        Claude via `claude -p` (stream-json, tools)
-  stt.py        push-to-talk recorder, hands-free listener, faster-whisper
-  tts.py        Piper voice playback
+  editor.py     workspace editor: languages, colouring, auto-indent
+  dashboard.py  progress and soft-skills dashboard
+  progress.py   SQLite progress store
+  knowledge.py  difficulty bars, company tiers, topic ladders, traps
+  soft.py       speech delivery metrics, webcam tracker, soft-skill rubric
+  resume.py     resume text extraction and claim analysis
+  responsive.py reflowing layouts
   screen.py     Wayland screenshots via the portal
+  llm.py        Claude via `claude -p`
+  config.py     paths and settings
 ```
+
+## Credits and licences
+
+Interview Gym downloads these models and libraries on your machine; none are included in this repository.
+
+| Component | Licence |
+|---|---|
+| [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) voices, via [kokoro-onnx](https://github.com/thewh1teagle/kokoro-onnx) | Apache 2.0 / MIT |
+| [NVIDIA Parakeet TDT 0.6B v2](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2), via [onnx-asr](https://github.com/istupakov/onnx-asr) | CC-BY-4.0 / MIT |
+| [Silero VAD](https://github.com/snakers4/silero-vad) (bundled with faster-whisper) | MIT |
+| [faster-whisper](https://github.com/SYSTRAN/faster-whisper) | MIT |
+| [Piper](https://github.com/rhasspy/piper) "Classic" voices; the Indian English L2-ARCTIC voices are **non-commercial** | MIT / dataset licences |
+| [OpenCV](https://opencv.org) and the YuNet face detector | Apache 2.0 / MIT |
+| [PySide6 / Qt](https://www.qt.io/qt-for-python) | LGPL v3 |
+| [Mermaid](https://mermaid.js.org), [Pygments](https://pygments.org), [markdown-it-py](https://github.com/executablebooks/markdown-it-py) | MIT / BSD |
+
+Interview Gym is a personal practice tool. It isn't affiliated with Anthropic, NVIDIA or any company named in the interview content.
