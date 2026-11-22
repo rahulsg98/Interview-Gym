@@ -30,7 +30,7 @@ class Settings:
     headphones: bool = False
     code_language: str = "Java"
     mic: str = ""                         # PipeWire mic node; "" = Auto (default mic, skipping silent ones)
-    answer_pause: float = 1.5             # seconds of silence before Arjun treats your turn as finished           # default language for coding questions in the workspace
+    answer_pause: float = 3.0             # seconds of silence before Arjun treats your turn as finished
     profiles: dict = field(default_factory=dict)  # name -> {role, resume, jd, focus}
 
     @classmethod

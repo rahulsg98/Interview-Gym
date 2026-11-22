@@ -353,7 +353,7 @@ language tag and complexity, a table for trade-offs, and a ```mermaid diagram fo
         seg = self.agenda[seg_i]["title"] if self.agenda else ""
         coding = turn.segment in ("coding", "machine_coding", "design")
         convo = "\n".join(f"{w} [{k}]: {t}" for w, t, k in turn.exchanges[-20:]) or "(nothing yet)"
-        pause = "about 1.5 seconds" if event == "utterance" else "n/a"
+        pause = f"about {getattr(self, 'pause_sec', 3.0):g} seconds" if event == "utterance" else "n/a"
         prompt = f"""You are mid-interview, on this question:
 "{turn.question}"
 Segment: {seg} ({seg_left / 60:.1f} min left in it; {max(0, self.remaining()) / 60:.1f} min left in the interview).

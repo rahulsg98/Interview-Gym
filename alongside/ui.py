@@ -842,6 +842,7 @@ class MainWindow(QMainWindow):
         if self.speaker:
             self.speaker.stop()
         self.session = Session(profile=self._current_profile(), model=self.settings.claude_model)
+        self.session.pause_sec = self.pause_box.value()  # tells Claude how long you had paused
         self.chat_view.clear(); self.answer.clear()
         self.pad.clear(); self._pad_snapshot = ""; self._time_up = False
         self.agenda_lbl.setText("<i>Planning the agenda…</i>"); self.clock_lbl.setText("")

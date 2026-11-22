@@ -7,7 +7,7 @@ The interviewer:
 - shows what it says at the moment the voice starts, not before;
 - if you keep talking while it is thinking, throws that reply away and reacts to everything you said;
 - stays quiet while you code, peeks at the pad when you pause typing, checks in after long silences;
-- says short acknowledgements ("Okay.", "Go on.", "I see.") so you know it's listening;
+- says short acknowledgements ("Ok.", "Go on.", "I see.") so you know it's listening;
 - moves on when you say you're done ("that's my answer", "I'm done", "next question") or it judges the answer complete.
 """
 from __future__ import annotations
@@ -23,7 +23,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 
 DONE_RE = re.compile(r"\b((i'?m|i am) done with (my|the|this) (answer|solution|code)|i'?m done|i am done|that'?s (it|all|my answer)|that is (it|all|my answer)|done with (my|the|this) "
                      r"(answer|solution|code)|next question|move on|let'?s move on|i'?m finished|finished)\b", re.I)
-BACKCHANNELS = ["Okay.", "Right.", "I see.", "Got it.", "Go on.", "Okay, go on.", "Sure."]
+BACKCHANNELS = ["Ok.", "Right.", "I see.", "Got it.", "Go on.", "Ok, go on.", "Sure."]
 
 
 class LiveConversation(QObject):
@@ -119,7 +119,7 @@ class LiveConversation(QObject):
         self.next_after_speech = False
         self._set_state("hold")
         if random.random() < 0.6:
-            self._speak(random.choice(["Okay.", "Alright.", "Noted.", "Okay, let's continue."]))
+            self._speak(random.choice(["Ok.", "Alright.", "Noted.", "Ok, let's continue."]))
             self._set_state("hold")
 
     def set_paused(self, paused: bool):
@@ -213,7 +213,7 @@ class LiveConversation(QObject):
             self._quick_ack()
 
     def _quick_ack(self):
-        """A short "Okay." / "I see." right after you pause, so you know Arjun is with you while he thinks.
+        """A short "Ok." / "I see." right after you pause, so you know Arjun is with you while he thinks.
         Only with headphones (on speakers it would mute the mic and could clip your next words)."""
         now = time.time()
         sp = self.host.speaker

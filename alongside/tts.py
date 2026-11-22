@@ -208,6 +208,7 @@ class Speaker:
         text = re.sub(r"`([^`]*)`", r"\1", text)
         text = re.sub(r"[*_#>|]+", " ", text)
         text = re.sub(r"https?://\S+", "", text)
+        text = re.sub(r"\b[Oo]kay\b", "Ok", text)  # "Ok" sounds more natural than "Okay" in this voice
         return re.sub(r"\s+", " ", text).strip()
 
     def say(self, text: str, on_start=None) -> None:
@@ -225,13 +226,13 @@ class Speaker:
             self._text_q.put((gen, sentence, on_start if i == 0 else None))
 
     # Said often; generated once in the background so they play instantly with the natural voice.
-    COMMON = ["Okay.", "Go on.", "Right.", "I see.", "Got it.", "Alright.", "Noted.", "Sure.", "Okay, go on.",
-              "Okay, let's continue.", "Okay,", "Right,", "Alright,", "Sure,", "Good,", "So,", "Interesting,",
+    COMMON = ["Ok.", "Go on.", "Right.", "I see.", "Got it.", "Alright.", "Noted.", "Sure.", "Ok, go on.",
+              "Ok, let's continue.", "Ok,", "Right,", "Alright,", "Sure,", "Good,", "So,", "Interesting,",
               "I see,", "Are you sure?",
               "Why?", "Go on, I'm listening.", "That's time. Thanks, we'll stop here.",
-              "Okay, next question.", "Alright, moving on.", "Right, next one.", "Okay, let's go deeper."]
-    LEAD_INS = {"question": ["Okay, next question.", "Alright, moving on.", "Right, next one."],
-                "followup": ["Okay, let's go deeper.", "Okay,", "Right,"]}
+              "Ok, next question.", "Alright, moving on.", "Right, next one.", "Ok, let's go deeper."]
+    LEAD_INS = {"question": ["Ok, next question.", "Alright, moving on.", "Right, next one."],
+                "followup": ["Ok, let's go deeper.", "Ok,", "Right,"]}
 
     JOINERS = {"that", "which", "who", "where", "when", "while", "because", "so", "but", "and", "or", "if",
                "for", "with", "without", "using", "to", "in", "on", "at", "from", "into", "across", "between"}
@@ -245,7 +246,7 @@ class Speaker:
             if (i == 0 or len(sent.split()) > 14) and ", " in sent:
                 parts = [x for x in re.split(r"(?<=,)\s+", sent) if x]
                 merged: list[str] = []
-                for part in parts:  # avoid fragments of 1-2 words, except leading fillers like "Okay,"
+                for part in parts:  # avoid fragments of 1-2 words, except leading fillers like "Ok,"
                     if merged and len(merged[-1].split()) < 3 and not (len(merged) == 1 and i == 0
                                                                       and merged[0] in Speaker.COMMON):
                         merged[-1] += " " + part
