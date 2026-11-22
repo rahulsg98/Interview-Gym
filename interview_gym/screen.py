@@ -25,7 +25,7 @@ def capture(interactive: bool = False, timeout: float = 90) -> Path:
 
     conn = open_dbus_connection(bus="SESSION")
     try:
-        token = "alongside" + secrets.token_hex(4)
+        token = "interviewgym" + secrets.token_hex(4)
         sender = conn.unique_name[1:].replace(".", "_")
         handle = f"/org/freedesktop/portal/desktop/request/{sender}/{token}"
         rule = MatchRule(type="signal", interface="org.freedesktop.portal.Request",

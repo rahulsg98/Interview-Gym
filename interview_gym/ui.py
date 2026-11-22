@@ -883,7 +883,7 @@ class MainWindow(QMainWindow):
         i = self.mic_box.findData(self.settings.mic)
         self.mic_box.setCurrentIndex(max(0, i))
 
-    PREVIEW_LINE = ("Okay, that's a reasonable start. But you said the cache is always consistent. Are you sure? "
+    PREVIEW_LINE = ("Ok, that's a reasonable start. But you said the cache is always consistent. Are you sure? "
                     "Walk me through what happens when two writes hit the same key.")
 
     def _preview_voice(self):
@@ -984,6 +984,8 @@ class MainWindow(QMainWindow):
     def _on_question(self, turn: Turn):
         if not self.session or self.session.aborted or turn not in self.session.turns:
             return
+        from .live import no_okay
+        turn.question = no_okay(turn.question)  # shown and spoken the same way: "Ok"/"Got it", never "Okay"
         tag = {"followup": "Follow-up", "wrap": "Interviewer"}.get(turn.kind, f"Q{self.session.main_questions_asked}")
         seg_name = SEGMENTS.get(turn.segment, "").split(" (")[0]
         meta = " · ".join(x for x in (tag, seg_name, turn.topic) if x)
@@ -1635,7 +1637,7 @@ def _install_crash_logging():
     import faulthandler
     import logging
     from .config import DATA_DIR
-    log_path = DATA_DIR / "alongside.log"
+    log_path = DATA_DIR / "interview-gym.log"
     logging.basicConfig(filename=log_path, level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
     crash_file = open(DATA_DIR / "crash.log", "a")  # noqa: SIM115 (kept open for faulthandler)
@@ -1658,13 +1660,13 @@ def main():
     _install_crash_logging()
     app = QApplication(sys.argv)
     app.setApplicationName("Interview Gym")
-    app.setDesktopFileName("alongside")
+    app.setDesktopFileName("interview-gym")
     from PySide6.QtGui import QIcon
     from .config import ROOT
     icon = QIcon()
     for size in (16, 24, 32, 48, 64, 128, 256, 512):
-        icon.addFile(str(ROOT / "assets" / f"alongside-{size}.png"))
-    app.setWindowIcon(QIcon.fromTheme("alongside", icon))
+        icon.addFile(str(ROOT / "assets" / f"interview-gym-{size}.png"))
+    app.setWindowIcon(QIcon.fromTheme("interview-gym", icon))
     font = app.font()
     font.setPointSize(11)
     app.setFont(font)

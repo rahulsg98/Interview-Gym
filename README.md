@@ -1,6 +1,6 @@
 # Interview Gym
 
-Interview Gym is a personal desktop app for practising tough mock interviews for IT roles on Ubuntu (GNOME, Wayland). (The project folder and code package are still named `alongside`.)
+Interview Gym is a personal desktop app for practising tough mock interviews for IT roles on Ubuntu (GNOME, Wayland).
 
 The interviewer, "Arjun", speaks in an Indian English male voice and acts as a **harsh bar-raiser**:
 - He drills every topic deep (concept → internals → edge cases → scale → real world) and doesn't let vague answers slide.
@@ -57,7 +57,7 @@ Anything ended earlier is **discarded**: no report, no history entry and nothing
   - Big Tech (Microsoft, Amazon, Atlassian, Uber…)
   - Top tier (Google, Meta…)
 
-The question pools and expectations are in [alongside/knowledge.py](alongside/knowledge.py), compiled from 2024-2026 candidate reports.
+The question pools and expectations are in [interview_gym/knowledge.py](interview_gym/knowledge.py), compiled from 2024-2026 candidate reports.
 
 ## Readable reports
 Feedback, Report, History and Learnings are shown as designed pages, not plain text:
@@ -103,9 +103,11 @@ For the camera to work well, sit **facing** a light source, not with a window or
 | Hands-free listening | Silero neural voice detection plus the room's noise level on `arecord`, so background noise is ignored and quiet speech in a noisy room is still caught (1 s of audio before detection is kept, so first words aren't lost). Your speech is transcribed in pieces *while* you talk, so your words are ready right after the 3 s pause. Arjun never treats "still transcribing" as silence, and his text appears the moment his voice starts. | Local |
 | Camera | OpenCV and the YuNet face detector | Local |
 | Screen capture | xdg-desktop-portal Screenshot | Built in |
-| Data | SQLite at `~/.local/share/alongside/progress.db`, sessions in `~/.local/share/alongside/sessions` | Local |
+| Data | SQLite at `~/.local/share/interview-gym/progress.db`, sessions in `~/.local/share/interview-gym/sessions` | Local |
 
 ## Setup (one time only)
+
+The project lives in the `Interview-Gym` folder (GitHub: `rahulsg98/Interview-Gym`, private).
 
 Run these once from the project folder:
 
@@ -128,10 +130,10 @@ The first time you use screen review, GNOME asks for screenshot permission. Choo
 
 Tip: right-click the icon in the dock and choose **Pin to Dash** for one-click access.
 
-Your login, profiles, resume analyses, history and dashboard data are kept in `~/.local/share/alongside`, so nothing is lost when you close the app or restart.
+Your login, profiles, resume analyses, history and dashboard data are kept in `~/.local/share/interview-gym`, so nothing is lost when you close the app or restart.
 
 ### When you would use the terminal
-- **To see errors live while troubleshooting:** `./run.sh` from the project folder. Errors also always appear in a pop-up and in `~/.local/share/alongside/alongside.log`.
+- **To see errors live while troubleshooting:** `./run.sh` from the project folder. Errors also always appear in a pop-up and in `~/.local/share/interview-gym/interview-gym.log`.
 - **If Claude asks you to log in again** (questions fail with a "log in" error): run `claude`, then `/login`.
 - **If you move or rename the project folder:** run `./install-desktop.sh` again from the new location so the launcher points to it.
 - **After pulling updates from GitHub:** if `requirements.txt` changed, run `.venv/bin/pip install -r requirements.txt`.
@@ -149,7 +151,7 @@ Your login, profiles, resume analyses, history and dashboard data are kept in `~
 
 ## Project layout
 ```
-alongside/
+interview_gym/
   ui.py         main window, Interview tab, camera preview
   builder.py    Round Builder: research UI, timed hands-free loop, editor
   loop.py       company research (web), loop engine, traps & escalations, round scoring

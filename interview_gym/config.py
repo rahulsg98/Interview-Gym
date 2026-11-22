@@ -7,7 +7,12 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = Path(os.environ.get("ALONGSIDE_DATA", Path.home() / ".local/share/alongside"))
+_DEFAULT_DATA = Path.home() / ".local/share/interview-gym"
+_OLD_DATA = Path.home() / ".local/share/alongside"   # name used before the app was renamed
+DATA_DIR = Path(os.environ.get("INTERVIEW_GYM_DATA") or os.environ.get("ALONGSIDE_DATA") or _DEFAULT_DATA)
+if DATA_DIR == _DEFAULT_DATA and _OLD_DATA.is_dir() and not DATA_DIR.exists():
+    import shutil
+    shutil.move(str(_OLD_DATA), str(DATA_DIR))  # keep history, settings and downloaded models
 MODELS_DIR = DATA_DIR / "models"
 SESSIONS_DIR = DATA_DIR / "sessions"
 TMP_DIR = DATA_DIR / "tmp"

@@ -28,6 +28,19 @@ HOLD_ACKS = ["Ok.", "Right.", "Alright.", "Got it.", "Noted.", "Ok, let's contin
 _last_pick: dict[str, str] = {}
 
 
+OKAY_RE = re.compile(r"\b(okay|OKAY|Okay)\b")
+OKAY_SUBS = ["Ok", "Got it", "Alright", "Right"]
+
+
+def no_okay(text: str) -> str:
+    """Arjun never says "Okay" (it sounds odd in the voice): use Ok / Got it / Alright / Right, varied,
+    in both the text on screen and the speech."""
+    def sub(m):
+        w = pick("okay", OKAY_SUBS)
+        return w if m.group(0)[0].isupper() else w.lower()
+    return OKAY_RE.sub(sub, text or "")
+
+
 def pick(name: str, options: list[str]) -> str:
     """Random phrase, never the same one twice in a row, so acknowledgements sound varied."""
     choice = random.choice([o for o in options if o != _last_pick.get(name)] or options)
@@ -156,6 +169,7 @@ class LiveConversation(QObject):
 
     def say(self, text: str, kind: str = "say"):
         """Interviewer speaks; the UI shows the text when the voice starts (immediately if voice is off)."""
+        text = no_okay(text)
         if not text:
             return
         if not self._speak(text, lambda: self.interviewer.emit(text, kind)):

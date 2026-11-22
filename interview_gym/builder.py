@@ -621,6 +621,8 @@ class RoundBuilder(QWidget):
 
     def _speak(self, text: str, log: bool = True):
         """Speak and (if log) show the line in the conversation the moment the voice starts."""
+        from .live import no_okay
+        text = no_okay(text)
         if not text:
             return
         sp = self.host.speaker
@@ -751,6 +753,8 @@ class RoundBuilder(QWidget):
             self._request_reaction(ev)
             return
         if data.get("action") == "speak" and data.get("say"):
+            from .live import no_okay
+            data["say"] = no_okay(data["say"])  # transcript, screen and voice all say the same thing
             r.log.append((time.time(), "Interviewer", data["say"]))
             self._speak(data["say"])
             self.move_on_after_speech = bool(data.get("move_on"))
